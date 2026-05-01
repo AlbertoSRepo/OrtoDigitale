@@ -1,0 +1,624 @@
+{
+  "__inputs": [],
+  "__requires": [],
+  "annotations": { "list": [] },
+  "description": "Monitoraggio umidità suolo — 6 sensori WH51 su 3 aiuole",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "title": "Panoramica",
+      "type": "row"
+    },
+
+    {
+      "datasource": { "type": "influxdb", "uid": "influxdb-garden" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "Umidità (%)",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "line" }
+          },
+          "mappings": [],
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 30 },
+              { "color": "green", "value": 40 },
+              { "color": "blue", "value": 65 }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "WH51_01 (A1 near)" }, "properties": [{ "id": "color", "value": { "fixedColor": "#73BF69", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "WH51_02 (A1 far)" },  "properties": [{ "id": "color", "value": { "fixedColor": "#37872D", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "WH51_03 (A2 near)" }, "properties": [{ "id": "color", "value": { "fixedColor": "#5794F2", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "WH51_04 (A2 far)" },  "properties": [{ "id": "color", "value": { "fixedColor": "#1F60C4", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "WH51_05 (A3 near)" }, "properties": [{ "id": "color", "value": { "fixedColor": "#FF9830", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "WH51_06 (A3 far)" },  "properties": [{ "id": "color", "value": { "fixedColor": "#E02F44", "mode": "fixed" } }] }
+        ]
+      },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 1 },
+      "id": 1,
+      "options": {
+        "legend": { "calcs": ["last", "min", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb-garden" },
+          "query": "from(bucket: \"garden\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"soil_moisture\" and r._field == \"value\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: r.sensor_id + \" (A\" + r.aiuola + \" \" + r.position + \")\" }))\n  |> yield(name: \"mean\")",
+          "refId": "A"
+        }
+      ],
+      "title": "Umidità suolo — tutti i sensori",
+      "type": "timeseries"
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 11 },
+      "id": 101,
+      "title": "Per aiuola",
+      "type": "row"
+    },
+
+    {
+      "datasource": { "type": "influxdb", "uid": "influxdb-garden" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line", "fillOpacity": 15, "lineInterpolation": "smooth",
+            "lineWidth": 2, "showPoints": "never", "spanNulls": false
+          },
+          "max": 100, "min": 0, "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 30 },
+              { "color": "green", "value": 40 }
+            ]
+          }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "near" }, "properties": [{ "id": "color", "value": { "fixedColor": "#73BF69", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "far" },  "properties": [{ "id": "color", "value": { "fixedColor": "#37872D", "mode": "fixed" } }] }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 12 },
+      "id": 2,
+      "options": {
+        "legend": { "calcs": ["last"], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb-garden" },
+          "query": "from(bucket: \"garden\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"soil_moisture\" and r._field == \"value\" and r.aiuola == \"1\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: r.position }))\n  |> yield(name: \"mean\")",
+          "refId": "A"
+        }
+      ],
+      "title": "Aiuola 1 — Sinistra (WH51_01/02)",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "influxdb", "uid": "influxdb-garden" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line", "fillOpacity": 15, "lineInterpolation": "smooth",
+            "lineWidth": 2, "showPoints": "never", "spanNulls": false
+          },
+          "max": 100, "min": 0, "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 30 },
+              { "color": "green", "value": 40 }
+            ]
+          }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "near" }, "properties": [{ "id": "color", "value": { "fixedColor": "#5794F2", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "far" },  "properties": [{ "id": "color", "value": { "fixedColor": "#1F60C4", "mode": "fixed" } }] }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 12 },
+      "id": 3,
+      "options": {
+        "legend": { "calcs": ["last"], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb-garden" },
+          "query": "from(bucket: \"garden\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"soil_moisture\" and r._field == \"value\" and r.aiuola == \"2\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: r.position }))\n  |> yield(name: \"mean\")",
+          "refId": "A"
+        }
+      ],
+      "title": "Aiuola 2 — Centro (WH51_03/04)",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "influxdb", "uid": "influxdb-garden" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line", "fillOpacity": 15, "lineInterpolation": "smooth",
+            "lineWidth": 2, "showPoints": "never", "spanNulls": false
+          },
+          "max": 100, "min": 0, "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 30 },
+              { "color": "green", "value": 40 }
+            ]
+          }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "near" }, "properties": [{ "id": "color", "value": { "fixedColor": "#FF9830", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "far" },  "properties": [{ "id": "color", "value": { "fixedColor": "#E02F44", "mode": "fixed" } }] }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 12 },
+      "id": 4,
+      "options": {
+        "legend": { "calcs": ["last"], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb-garden" },
+          "query": "from(bucket: \"garden\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"soil_moisture\" and r._field == \"value\" and r.aiuola == \"3\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: r.position }))\n  |> yield(name: \"mean\")",
+          "refId": "A"
+        }
+      ],
+      "title": "Aiuola 3 — Destra (WH51_05/06)",
+      "type": "timeseries"
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 20 },
+      "id": 102,
+      "title": "Valori correnti",
+      "type": "row"
+    },
+
+    {
+      "datasource": { "type": "influxdb", "uid": "influxdb-garden" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "max": 100, "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 30 },
+              { "color": "green", "value": 40 },
+              { "color": "blue", "value": 65 }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 4, "x": 0, "y": 21 },
+      "id": 11,
+      "options": { "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "showThresholdLabels": false, "showThresholdMarkers": true, "text": {} },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb-garden" },
+          "query": "from(bucket: \"garden\")\n  |> range(start: -5m)\n  |> filter(fn: (r) => r._measurement == \"soil_moisture\" and r._field == \"value\" and r.sensor_id == \"WH51_01\")\n  |> last()",
+          "refId": "A"
+        }
+      ],
+      "title": "WH51_01 — A1 near",
+      "type": "gauge"
+    },
+
+    {
+      "datasource": { "type": "influxdb", "uid": "influxdb-garden" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "max": 100, "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 30 },
+              { "color": "green", "value": 40 },
+              { "color": "blue", "value": 65 }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 4, "x": 4, "y": 21 },
+      "id": 12,
+      "options": { "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "showThresholdLabels": false, "showThresholdMarkers": true, "text": {} },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb-garden" },
+          "query": "from(bucket: \"garden\")\n  |> range(start: -5m)\n  |> filter(fn: (r) => r._measurement == \"soil_moisture\" and r._field == \"value\" and r.sensor_id == \"WH51_02\")\n  |> last()",
+          "refId": "A"
+        }
+      ],
+      "title": "WH51_02 — A1 far",
+      "type": "gauge"
+    },
+
+    {
+      "datasource": { "type": "influxdb", "uid": "influxdb-garden" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "max": 100, "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 30 },
+              { "color": "green", "value": 40 },
+              { "color": "blue", "value": 65 }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 4, "x": 8, "y": 21 },
+      "id": 13,
+      "options": { "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "showThresholdLabels": false, "showThresholdMarkers": true, "text": {} },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb-garden" },
+          "query": "from(bucket: \"garden\")\n  |> range(start: -5m)\n  |> filter(fn: (r) => r._measurement == \"soil_moisture\" and r._field == \"value\" and r.sensor_id == \"WH51_03\")\n  |> last()",
+          "refId": "A"
+        }
+      ],
+      "title": "WH51_03 — A2 near",
+      "type": "gauge"
+    },
+
+    {
+      "datasource": { "type": "influxdb", "uid": "influxdb-garden" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "max": 100, "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 30 },
+              { "color": "green", "value": 40 },
+              { "color": "blue", "value": 65 }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 4, "x": 12, "y": 21 },
+      "id": 14,
+      "options": { "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "showThresholdLabels": false, "showThresholdMarkers": true, "text": {} },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb-garden" },
+          "query": "from(bucket: \"garden\")\n  |> range(start: -5m)\n  |> filter(fn: (r) => r._measurement == \"soil_moisture\" and r._field == \"value\" and r.sensor_id == \"WH51_04\")\n  |> last()",
+          "refId": "A"
+        }
+      ],
+      "title": "WH51_04 — A2 far",
+      "type": "gauge"
+    },
+
+    {
+      "datasource": { "type": "influxdb", "uid": "influxdb-garden" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "max": 100, "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 30 },
+              { "color": "green", "value": 40 },
+              { "color": "blue", "value": 65 }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 4, "x": 16, "y": 21 },
+      "id": 15,
+      "options": { "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "showThresholdLabels": false, "showThresholdMarkers": true, "text": {} },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb-garden" },
+          "query": "from(bucket: \"garden\")\n  |> range(start: -5m)\n  |> filter(fn: (r) => r._measurement == \"soil_moisture\" and r._field == \"value\" and r.sensor_id == \"WH51_05\")\n  |> last()",
+          "refId": "A"
+        }
+      ],
+      "title": "WH51_05 — A3 near",
+      "type": "gauge"
+    },
+
+    {
+      "datasource": { "type": "influxdb", "uid": "influxdb-garden" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "max": 100, "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 30 },
+              { "color": "green", "value": 40 },
+              { "color": "blue", "value": 65 }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 4, "x": 20, "y": 21 },
+      "id": 16,
+      "options": { "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "showThresholdLabels": false, "showThresholdMarkers": true, "text": {} },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb-garden" },
+          "query": "from(bucket: \"garden\")\n  |> range(start: -5m)\n  |> filter(fn: (r) => r._measurement == \"soil_moisture\" and r._field == \"value\" and r.sensor_id == \"WH51_06\")\n  |> last()",
+          "refId": "A"
+        }
+      ],
+      "title": "WH51_06 — A3 far",
+      "type": "gauge"
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 27 },
+      "id": 103,
+      "title": "Stato sistema",
+      "type": "row"
+    },
+
+    {
+      "datasource": { "type": "influxdb", "uid": "influxdb-garden" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "custom": {
+            "align": "auto",
+            "cellOptions": { "type": "auto" },
+            "inspect": false
+          },
+          "mappings": [
+            { "options": { "0": { "color": "red", "index": 0, "text": "OFFLINE" }, "1": { "color": "green", "index": 1, "text": "ONLINE" } }, "type": "value" }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "online" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+              { "id": "custom.width", "value": 100 }
+            ]
+          },
+          { "matcher": { "id": "byName", "options": "sensor_id" }, "properties": [{ "id": "custom.width", "value": 110 }] },
+          { "matcher": { "id": "byName", "options": "battery_voltage" }, "properties": [{ "id": "unit", "value": "volt" }, { "id": "custom.width", "value": 130 }] },
+          { "matcher": { "id": "byName", "options": "last_seen_seconds_ago" }, "properties": [{ "id": "unit", "value": "s" }, { "id": "displayName", "value": "Visto" }, { "id": "custom.width", "value": 100 }] }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 28 },
+      "id": 20,
+      "options": {
+        "cellHeight": "sm",
+        "footer": { "countRows": false, "fields": "", "reducer": ["sum"], "show": false },
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb-garden" },
+          "query": "from(bucket: \"garden\")\n  |> range(start: -10m)\n  |> filter(fn: (r) => r._measurement == \"system_health\" and r.component_type == \"sensor\")\n  |> filter(fn: (r) => r._field == \"online\" or r._field == \"battery_voltage\" or r._field == \"last_seen_seconds_ago\")\n  |> last()\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")",
+          "refId": "A"
+        }
+      ],
+      "title": "Stato sensori",
+      "transformations": [
+        { "id": "organize", "options": { "excludeByName": { "_start": true, "_stop": true, "_measurement": true, "component_type": true, "_time": true }, "renameByName": { "component": "Sensore", "online": "Stato", "battery_voltage": "Batteria (V)", "last_seen_seconds_ago": "Ultimo dato" } } }
+      ],
+      "type": "table"
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 36 },
+      "id": 104,
+      "title": "Controllo valvola (SWV_01)",
+      "type": "row"
+    },
+
+    {
+      "datasource": { "type": "datasource", "uid": "grafana" },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 37 },
+      "id": 30,
+      "options": {
+        "initial": { "method": "NONE", "url": "http://192.168.1.46:1880/api/valve/toggle", "contentType": "application/json" },
+        "update": {
+          "method": "POST",
+          "url": "http://192.168.1.46:1880/api/valve/toggle",
+          "contentType": "application/json",
+          "confirm": false
+        },
+        "reset": { "variant": "hidden" },
+        "submit": { "text": "TOGGLE valvola", "variant": "primary", "icon": "cog", "backgroundColor": "purple", "foregroundColor": "white", "size": "lg" },
+        "saveDefault": { "variant": "hidden" },
+        "layout": { "variant": "single", "padding": 10, "sections": [] },
+        "elements": [
+          {
+            "id": "action",
+            "title": "Action",
+            "type": "string",
+            "value": "toggle",
+            "labelWidth": 0,
+            "width": 0,
+            "hidden": true,
+            "section": "",
+            "tooltip": "",
+            "unit": "",
+            "disableIfOptions": { "conditions": [] }
+          }
+        ],
+        "buttonGroup": { "size": "md", "orientation": "center" },
+        "sync": false,
+        "resetAction": { "mode": "initial" },
+        "confirmModal": { "title": "Conferma", "body": "Attivare/disattivare la valvola?", "confirm": "Sì", "cancel": "Annulla", "elementDisplayMode": "none" }
+      },
+      "title": "Comando TOGGLE",
+      "description": "Invia POST a Node-RED → MQTT → Zigbee. Safety timer 15 min auto-OFF.",
+      "type": "volkovlabs-form-panel"
+    },
+
+    {
+      "datasource": { "type": "influxdb", "uid": "influxdb-garden" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [
+            { "options": { "1": { "color": "blue", "index": 0, "text": "APERTA" }, "0": { "color": "dark-green", "index": 1, "text": "CHIUSA" } }, "type": "value" }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "dark-green", "value": null }, { "color": "blue", "value": 1 }] }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 37 },
+      "id": 31,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value",
+        "text": { "valueSize": 48 }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb-garden" },
+          "query": "from(bucket: \"garden\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r._measurement == \"valve_state\" and r._field == \"state\" and r.valve_id == \"SWV_01\")\n  |> last()\n  |> map(fn: (r) => ({ r with _value: if r._value == \"ON\" then 1.0 else 0.0 }))",
+          "refId": "A"
+        }
+      ],
+      "title": "Stato valvola",
+      "type": "stat"
+    },
+
+    {
+      "datasource": { "type": "influxdb", "uid": "influxdb-garden" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "max": 100, "min": 0, "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 20 },
+              { "color": "green", "value": 50 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 37 },
+      "id": 32,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb-garden" },
+          "query": "from(bucket: \"garden\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r._measurement == \"valve_state\" and (r._field == \"battery\" or r._field == \"linkquality\") and r.valve_id == \"SWV_01\")\n  |> last()\n  |> map(fn: (r) => ({ r with _field: if r._field == \"battery\" then \"Batteria\" else \"Signal (lqi)\" }))",
+          "refId": "A"
+        }
+      ],
+      "title": "Batteria / Signal valvola",
+      "type": "stat"
+    }
+
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "tags": ["orto-digitale", "sensori", "umidita"],
+  "templating": { "list": [] },
+  "time": { "from": "now-24h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Orto Digitale — Umidità Sensori",
+  "uid": "orto-moisture-v1",
+  "version": 1,
+  "weekStart": ""
+}

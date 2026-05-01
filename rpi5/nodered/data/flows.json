@@ -1,0 +1,395 @@
+[
+  {
+    "id": "f-ecowitt",
+    "type": "tab",
+    "label": "Ecowitt GW3000 -> InfluxDB",
+    "disabled": false,
+    "info": "Flow: sub MQTT `ecowitt/gw3000`, parse JSON Ecowitt multi-sensore, split su canali 1..4, write bucket `garden` measurement `soil_moisture` con tag aiuola=test, position=test.\n\nCredenziali richieste (inserire nella UI Node-RED al primo import):\n- MQTT: user `nodered`, password = valore di MQTT_PWD_NODERED in `.env`\n- InfluxDB: token = valore di INFLUXDB_TOKEN_NODERED_RW in `.env`",
+    "env": []
+  },
+  {
+    "id": "cfg-mqtt-mosquitto",
+    "type": "mqtt-broker",
+    "name": "Mosquitto (iot-net)",
+    "broker": "mosquitto",
+    "port": "1883",
+    "clientid": "nodered-orto",
+    "autoConnect": true,
+    "usetls": false,
+    "protocolVersion": "4",
+    "keepalive": "60",
+    "cleansession": true,
+    "birthTopic": "nodered/status",
+    "birthQos": "0",
+    "birthPayload": "online",
+    "birthMsg": {},
+    "closeTopic": "nodered/status",
+    "closeQos": "0",
+    "closePayload": "offline",
+    "closeMsg": {},
+    "willTopic": "nodered/status",
+    "willQos": "0",
+    "willPayload": "offline",
+    "willMsg": {},
+    "userProps": "",
+    "sessionExpiry": ""
+  },
+  {
+    "id": "cfg-influxdb",
+    "type": "influxdb",
+    "hostname": "127.0.0.1",
+    "port": "8086",
+    "protocol": "http",
+    "database": "database",
+    "name": "InfluxDB garden",
+    "usetls": false,
+    "tls": "",
+    "influxdbVersion": "2.0",
+    "url": "http://influxdb:8086",
+    "timeout": "10",
+    "rejectUnauthorized": false
+  },
+  {
+    "id": "n-mqtt-in-ecowitt",
+    "type": "mqtt in",
+    "z": "f-ecowitt",
+    "name": "sub ecowitt/gw3000",
+    "topic": "ecowitt/gw3000",
+    "qos": "1",
+    "datatype": "utf8",
+    "broker": "cfg-mqtt-mosquitto",
+    "nl": false,
+    "rap": false,
+    "rh": 0,
+    "inputs": 0,
+    "x": 160,
+    "y": 120,
+    "wires": [
+      [
+        "n-fn-parse",
+        "n-debug-raw"
+      ]
+    ]
+  },
+  {
+    "id": "n-fn-parse",
+    "type": "function",
+    "z": "f-ecowitt",
+    "name": "parse WH51 -> points",
+    "func": "// Input: payload Ecowitt GW3000. Due formati possibili:\n//  (a) stringa form-urlencoded (default firmware GW3000A_V1.2.0)\n//      es: \"PASSKEY=...&soilmoisture1=33&soilbatt1=1.7&...\"\n//  (b) oggetto JSON (inject di test o firmware che pubblica JSON)\n// Campi per canale N (1..4):\n//   soilmoisture{N}  -> umidita' %  (field value, float)\n//   soilbatt{N}      -> tensione V  (field battery_voltage, float)\n//   battery_ok       -> derivato da battery_voltage >= 1.1 (bool)\n// Nota: 'rssi' non viene scritto (field type conflict con schema legacy).\n// Tag: sensor_id=WH51_0N, aiuola=test, position=test.\n\nlet raw = msg.payload;\n\nif (typeof raw === 'string') {\n    const parsed = {};\n    for (const pair of raw.split('&')) {\n        if (!pair) continue;\n        const eq = pair.indexOf('=');\n        if (eq < 0) continue;\n        const k = decodeURIComponent(pair.slice(0, eq));\n        const v = decodeURIComponent(pair.slice(eq + 1).replace(/\\+/g, ' '));\n        parsed[k] = v;\n    }\n    raw = parsed;\n}\n\nif (!raw || typeof raw !== 'object') {\n    node.warn('Payload non riconosciuto, scarto');\n    return null;\n}\n\nconst CHANNELS = [1, 2, 3, 4];\nconst BATTERY_OK_THRESHOLD = 1.1;\nconst out = [];\n\nfor (const ch of CHANNELS) {\n    const mRaw = raw['soilmoisture' + ch];\n    if (mRaw === undefined || mRaw === null || mRaw === '') continue;\n    const value = Number(mRaw);\n    if (!Number.isFinite(value)) continue;\n\n    const battRaw = raw['soilbatt' + ch];\n    const battery_voltage = Number(battRaw);\n    const battery_ok = Number.isFinite(battery_voltage) && battery_voltage >= BATTERY_OK_THRESHOLD;\n\n    out.push([\n        {\n            value: value,\n            battery_voltage: Number.isFinite(battery_voltage) ? battery_voltage : 0,\n            battery_ok: battery_ok\n        },\n        {\n            sensor_id: 'WH51_0' + ch,\n            aiuola: 'test',\n            position: 'test'\n        }\n    ]);\n}\n\nif (out.length === 0) {\n    node.warn('Nessun canale soilmoisture1..4 valido nel payload');\n    return null;\n}\n\nreturn { payload: out, measurement: 'soil_moisture' };\n",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 400,
+    "y": 120,
+    "wires": [
+      [
+        "n-influx-out",
+        "n-debug-points"
+      ]
+    ]
+  },
+  {
+    "id": "n-influx-out",
+    "type": "influxdb out",
+    "z": "f-ecowitt",
+    "influxdb": "cfg-influxdb",
+    "name": "write garden/soil_moisture",
+    "measurement": "soil_moisture",
+    "precision": "",
+    "retentionPolicy": "",
+    "database": "database",
+    "precisionV18FluxV20": "ms",
+    "retentionPolicyV18Flux": "",
+    "org": "orto-digitale",
+    "bucket": "garden",
+    "x": 700,
+    "y": 100,
+    "wires": []
+  },
+  {
+    "id": "n-debug-raw",
+    "type": "debug",
+    "z": "f-ecowitt",
+    "name": "raw payload",
+    "active": false,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 400,
+    "y": 60,
+    "wires": []
+  },
+  {
+    "id": "n-debug-points",
+    "type": "debug",
+    "z": "f-ecowitt",
+    "name": "parsed points",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": true,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "payload.length",
+    "statusType": "msg",
+    "x": 700,
+    "y": 160,
+    "wires": []
+  },
+  {
+    "id": "n-inject-test",
+    "type": "inject",
+    "z": "f-ecowitt",
+    "name": "TEST: payload sintetico",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": "",
+    "topic": "ecowitt/gw3000",
+    "payload": "{\"PASSKEY\":\"TEST\",\"stationtype\":\"GW3000\",\"dateutc\":\"2026-04-18 12:00:00\",\"soilmoisture1\":\"42.5\",\"soilbatt1\":\"1.45\",\"wh51ch1_sig\":\"-62\",\"soilmoisture2\":\"38.1\",\"soilbatt2\":\"1.38\",\"wh51ch2_sig\":\"-70\",\"soilmoisture3\":\"55.0\",\"soilbatt3\":\"1.50\",\"wh51ch3_sig\":\"-58\",\"soilmoisture4\":\"29.7\",\"soilbatt4\":\"1.22\",\"wh51ch4_sig\":\"-74\"}",
+    "payloadType": "json",
+    "x": 170,
+    "y": 220,
+    "wires": [
+      [
+        "n-fn-parse"
+      ]
+    ]
+  },
+  {
+    "id": "f-valve",
+    "type": "tab",
+    "label": "Valvola SWV (cmd + stato + safety)",
+    "disabled": false,
+    "info": "Flow valvola SONOFF SWV (Zigbee via Z2M).\n\nEndpoint HTTP:\n- POST /api/valve/on      -> pub {state:ON}\n- POST /api/valve/off     -> pub {state:OFF}\n- POST /api/valve/toggle  -> pub {state:TOGGLE}\nRisposta JSON: {ok:true, action, sent} oppure 400.\n\nStato:\n- sub zigbee2mqtt/SWV_valvola -> write InfluxDB measurement valve_state (tag valve_id=SWV_01)\n\nSafety timer (n-fn-valve-safety):\n- Quando arriva state=ON arma un setTimeout di SAFETY_MIN minuti (default 15)\n- Allo scadere pubblica {state:OFF} su zigbee2mqtt/SWV_valvola/set (evita allagamento)\n- Ogni nuovo ON resetta il timer; un OFF (manuale o del safety stesso) lo disarma\n- Per test veloci: flow.set('safety_min_override', 0.5) in console (30 sec)\n\nCORS:\n- 'Access-Control-Allow-Origin: *' sugli endpoint per permettere a Grafana Business Forms Panel (origine :3000) di chiamare Node-RED (:1880).\n\nNessuna auth sull'endpoint — LAN domestica. Se in futuro serve, aggiungere check X-API-Key nel function node validate.",
+    "env": []
+  },
+  {
+    "id": "n-http-valve-cmd",
+    "type": "http in",
+    "z": "f-valve",
+    "name": "POST /api/valve/:action",
+    "url": "/api/valve/:action",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 180,
+    "y": 100,
+    "wires": [
+      [
+        "n-fn-valve-validate"
+      ]
+    ]
+  },
+  {
+    "id": "n-http-valve-options",
+    "type": "http in",
+    "z": "f-valve",
+    "name": "OPTIONS /api/valve/:action",
+    "url": "/api/valve/:action",
+    "method": "options",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 180,
+    "y": 160,
+    "wires": [
+      [
+        "n-fn-valve-cors-preflight"
+      ]
+    ]
+  },
+  {
+    "id": "n-fn-valve-cors-preflight",
+    "type": "function",
+    "z": "f-valve",
+    "name": "CORS preflight 204",
+    "func": "msg.statusCode = 204;\nmsg.headers = {\n    'Access-Control-Allow-Origin': '*',\n    'Access-Control-Allow-Methods': 'POST, OPTIONS',\n    'Access-Control-Allow-Headers': 'Content-Type',\n    'Access-Control-Max-Age': '600'\n};\nmsg.payload = '';\nreturn msg;\n",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 460,
+    "y": 160,
+    "wires": [
+      [
+        "n-http-resp-valve-preflight"
+      ]
+    ]
+  },
+  {
+    "id": "n-http-resp-valve-preflight",
+    "type": "http response",
+    "z": "f-valve",
+    "name": "resp 204",
+    "statusCode": "",
+    "headers": {},
+    "x": 720,
+    "y": 160,
+    "wires": []
+  },
+  {
+    "id": "n-fn-valve-validate",
+    "type": "function",
+    "z": "f-valve",
+    "name": "validate + build MQTT cmd",
+    "func": "// Valida :action e costruisce il payload MQTT per zigbee2mqtt/SWV_valvola/set.\n// Output 1: messaggio MQTT (topic + payload JSON)\n// Output 2: messaggio HTTP response (CORS + JSON body)\n\nconst raw = ((msg.req && msg.req.params && msg.req.params.action) || '').toLowerCase();\nconst MAP = { on: 'ON', off: 'OFF', toggle: 'TOGGLE' };\nconst mqttState = MAP[raw];\n\nmsg.headers = {\n    'Access-Control-Allow-Origin': '*',\n    'Access-Control-Allow-Methods': 'POST, OPTIONS',\n    'Access-Control-Allow-Headers': 'Content-Type'\n};\n\nif (!mqttState) {\n    msg.statusCode = 400;\n    msg.payload = { ok: false, error: `invalid action '${raw}', use on/off/toggle` };\n    node.status({ fill: 'red', shape: 'ring', text: `400 '${raw}'` });\n    return [null, msg];\n}\n\nconst mqttMsg = {\n    topic: 'zigbee2mqtt/SWV_valvola/set',\n    payload: { state: mqttState }\n};\n\nmsg.statusCode = 200;\nmsg.payload = { ok: true, action: raw, sent: mqttState };\nnode.status({ fill: 'blue', shape: 'dot', text: `${raw} @ ${new Date().toISOString().substr(11, 8)}` });\n\nreturn [mqttMsg, msg];\n",
+    "outputs": 2,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 480,
+    "y": 100,
+    "wires": [
+      [
+        "n-mqtt-out-valve-set"
+      ],
+      [
+        "n-http-resp-valve-cmd"
+      ]
+    ]
+  },
+  {
+    "id": "n-mqtt-out-valve-set",
+    "type": "mqtt out",
+    "z": "f-valve",
+    "name": "pub zigbee2mqtt/SWV_valvola/set",
+    "topic": "",
+    "qos": "0",
+    "retain": "",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correlationData": "",
+    "expiry": "",
+    "broker": "cfg-mqtt-mosquitto",
+    "x": 830,
+    "y": 80,
+    "wires": []
+  },
+  {
+    "id": "n-http-resp-valve-cmd",
+    "type": "http response",
+    "z": "f-valve",
+    "name": "resp 200/400 JSON",
+    "statusCode": "",
+    "headers": {},
+    "x": 790,
+    "y": 120,
+    "wires": []
+  },
+  {
+    "id": "n-mqtt-in-valve-state",
+    "type": "mqtt in",
+    "z": "f-valve",
+    "name": "sub zigbee2mqtt/SWV_valvola",
+    "topic": "zigbee2mqtt/SWV_valvola",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "cfg-mqtt-mosquitto",
+    "nl": false,
+    "rap": false,
+    "rh": 0,
+    "inputs": 0,
+    "x": 180,
+    "y": 280,
+    "wires": [
+      [
+        "n-fn-valve-parse",
+        "n-fn-valve-safety",
+        "n-debug-valve-state"
+      ]
+    ]
+  },
+  {
+    "id": "n-fn-valve-parse",
+    "type": "function",
+    "z": "f-valve",
+    "name": "parse state -> influx point",
+    "func": "// Dal payload Z2M estrae i campi di interesse e crea un point InfluxDB\n// con tag valve_id=SWV_01 nel measurement 'valve_state'.\nconst p = msg.payload;\nif (!p || typeof p !== 'object') return null;\n\nconst fields = { reachable: true };\nif (p.state === 'ON' || p.state === 'OFF') fields.state = p.state;\nif (Number.isFinite(p.battery)) fields.battery = Number(p.battery);\nif (Number.isFinite(p.linkquality)) fields.linkquality = Number(p.linkquality);\nif (p.current_device_status) fields.current_device_status = String(p.current_device_status);\n\n// Se abbiamo solo 'reachable' e nient'altro, non scriviamo (evita noise).\nif (Object.keys(fields).length <= 1) return null;\n\nreturn {\n    payload: [fields, { valve_id: 'SWV_01' }],\n    measurement: 'valve_state'\n};\n",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 490,
+    "y": 260,
+    "wires": [
+      [
+        "n-influx-out-valve"
+      ]
+    ]
+  },
+  {
+    "id": "n-influx-out-valve",
+    "type": "influxdb out",
+    "z": "f-valve",
+    "influxdb": "cfg-influxdb",
+    "name": "write garden/valve_state",
+    "measurement": "valve_state",
+    "precision": "",
+    "retentionPolicy": "",
+    "database": "database",
+    "precisionV18FluxV20": "ms",
+    "retentionPolicyV18Flux": "",
+    "org": "orto-digitale",
+    "bucket": "garden",
+    "x": 810,
+    "y": 260,
+    "wires": []
+  },
+  {
+    "id": "n-fn-valve-safety",
+    "type": "function",
+    "z": "f-valve",
+    "name": "safety timer auto-OFF",
+    "func": "// Safety: se state=ON arma setTimeout che forza OFF dopo SAFETY_MIN minuti.\n// Ogni nuovo ON resetta il timer. Ogni OFF (manuale o del safety) lo disarma.\n// flow.set('safety_min_override', 0.5) per test veloci (30 sec).\n\nconst SAFETY_MIN = Number(flow.get('safety_min_override')) || 15;\nconst state = msg.payload && msg.payload.state;\n\nlet h = context.get('timer');\nif (h) { clearTimeout(h); context.set('timer', null); }\n\nif (state === 'ON') {\n    const ms = SAFETY_MIN * 60 * 1000;\n    const fires_at = new Date(Date.now() + ms);\n    const handle = setTimeout(() => {\n        node.warn(`SAFETY TIMEOUT ${SAFETY_MIN}min: forcing OFF`);\n        node.send({\n            topic: 'zigbee2mqtt/SWV_valvola/set',\n            payload: { state: 'OFF' },\n            _safety: true\n        });\n        context.set('timer', null);\n        node.status({ fill: 'red', shape: 'dot', text: `TIMEOUT fired @ ${new Date().toISOString().substr(11, 8)}` });\n    }, ms);\n    context.set('timer', handle);\n    node.status({ fill: 'yellow', shape: 'dot', text: `armed ${SAFETY_MIN}m (OFF @ ${fires_at.toISOString().substr(11, 5)})` });\n} else if (state === 'OFF') {\n    node.status({ fill: 'green', shape: 'dot', text: 'disarmed (OFF)' });\n}\n\nreturn null;\n",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 470,
+    "y": 340,
+    "wires": [
+      [
+        "n-mqtt-out-valve-set"
+      ]
+    ]
+  },
+  {
+    "id": "n-debug-valve-state",
+    "type": "debug",
+    "z": "f-valve",
+    "name": "valve state",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": true,
+    "complete": "payload.state",
+    "targetType": "msg",
+    "statusVal": "payload.state",
+    "statusType": "msg",
+    "x": 460,
+    "y": 220,
+    "wires": []
+  }
+]

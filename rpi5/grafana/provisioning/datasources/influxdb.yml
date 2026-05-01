@@ -1,0 +1,17 @@
+apiVersion: 1
+
+datasources:
+  - name: InfluxDB
+    uid: influxdb-garden
+    type: influxdb
+    access: proxy
+    url: http://influxdb:8086
+    isDefault: true
+    jsonData:
+      version: Flux
+      organization: orto-digitale
+      defaultBucket: garden
+      httpMode: POST
+    secureJsonData:
+      token: s8qg2SeJHrYYH9YDbP29CdHdTgULLSQQs3nk6y2C9kOoQITGwV7z2G0PA7KRUGF3ZB4g_Wk_2MOoXF3uyIPJTw==
+    editable: false

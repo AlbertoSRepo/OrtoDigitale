@@ -1,0 +1,96 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto:latest
+    container_name: mosquitto
+    restart: always
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/config:/mosquitto/config:ro
+      - ./mosquitto/data:/mosquitto/data
+      - ./mosquitto/log:/mosquitto/log
+    networks:
+      - iot-net
+
+  influxdb:
+    image: influxdb:2
+    container_name: influxdb
+    restart: always
+    ports:
+      - "8086:8086"
+    volumes:
+      - ./influxdb/data:/var/lib/influxdb2
+      - ./influxdb/config:/etc/influxdb2
+    env_file:
+      - .env
+    networks:
+      - iot-net
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: always
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./grafana/data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=OrtoDigitale2026
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_SERVER_ROOT_URL=http://%(domain)s:3000/
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/orto-digitale.json
+      - GF_INSTALL_PLUGINS=volkovlabs-form-panel
+    depends_on:
+      - influxdb
+    networks:
+      - iot-net
+
+  zigbee2mqtt:
+    image: koenkk/zigbee2mqtt:latest
+    container_name: zigbee2mqtt
+    restart: always
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./zigbee2mqtt/data:/app/data
+      - ./zigbee2mqtt/configuration.yaml:/app/data/configuration.yaml
+      - /run/udev:/run/udev:ro
+    devices:
+      - /dev/serial/by-id/usb-ITead_Sonoff_Zigbee_3.0_USB_Dongle_Plus_98d2565d30a1ef11bb7a906661ce3355-if00-port0:/dev/ttyUSB0
+    environment:
+      - TZ=Europe/Rome
+      - ZIGBEE2MQTT_CONFIG_MQTT_PASSWORD=${MQTT_PASS_ZIGBEE2MQTT}
+    group_add:
+      - dialout
+    depends_on:
+      - mosquitto
+    networks:
+      - iot-net
+
+  nodered:
+    image: nodered/node-red:latest
+    container_name: nodered
+    restart: always
+    ports:
+      - "1880:1880"
+    volumes:
+      - ./nodered/data:/data
+    environment:
+      - TZ=Europe/Rome
+      - INFLUX_TOKEN_NODERED_RW=${INFLUX_TOKEN_NODERED_RW}
+      - INFLUXDB_ORG=${INFLUXDB_ORG:-orto-digitale}
+      - INFLUXDB_BUCKET=${INFLUXDB_BUCKET:-garden}
+      - MQTT_PASS_NODERED=${MQTT_PASS_NODERED}
+    depends_on:
+      - mosquitto
+      - influxdb
+    networks:
+      - iot-net
+
+networks:
+  iot-net:
+    driver: bridge

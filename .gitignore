@@ -1,0 +1,61 @@
+# =============================================================
+# Orto Digitale v1.1 — .gitignore
+# =============================================================
+
+# -----------------------------------------------
+# CREDENZIALI — mai committare, mai negoziabile
+# -----------------------------------------------
+rpi5/.env
+.env
+rpi5/nodered/data/flows_cred.json
+
+# -----------------------------------------------
+# Runtime Node-RED (generati automaticamente)
+# -----------------------------------------------
+rpi5/nodered/data/.config.runtime.json
+rpi5/nodered/data/.config.users.json
+rpi5/nodered/data/.config.*.json
+rpi5/nodered/data/context/
+rpi5/nodered/data/node_modules/
+rpi5/nodered/data/.sessions.json
+
+# -----------------------------------------------
+# Dati runtime Docker (volumi locali)
+# -----------------------------------------------
+rpi5/influxdb/data/
+rpi5/grafana/data/
+rpi5/mosquitto/data/
+rpi5/mosquitto/log/
+
+# -----------------------------------------------
+# Claude Code (configurazione locale IDE)
+# -----------------------------------------------
+.claude/
+
+# -----------------------------------------------
+# OS e editor
+# -----------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# -----------------------------------------------
+# Python
+# -----------------------------------------------
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# -----------------------------------------------
+# Log e temporanei
+# -----------------------------------------------
+*.log
+tmp/
+temp/
