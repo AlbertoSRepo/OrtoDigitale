@@ -1,0 +1,35 @@
+{
+  "irrigation": {
+    "soglia_apertura_pct": 40,
+    "soglia_chiusura_pct": 65,
+    "soglia_emergenza_pct": 25,
+    "cooldown_seconds": 7200,
+    "safety_timeout_seconds": 900,
+    "emergency_duration_seconds": 300,
+    "finestra_mattina": ["06:00", "08:00"],
+    "finestra_sera": ["19:00", "21:00"],
+    "polling_interval_seconds": 300,
+    "monitoring_interval_seconds": 60
+  },
+  "weather": {
+    "polling_interval_seconds": 1800,
+    "cache_max_age_seconds": 5400,
+    "rain_threshold_mm": 5,
+    "rain_window_hours": 24,
+    "api_url": "https://api.open-meteo.com/v1/forecast",
+    "lat": 45.71722434055733,
+    "lon": 9.733793667999565
+  },
+  "valve": {
+    "command_timeout_seconds": 30,
+    "max_retries": 1,
+    "unreachable_alert_after": 3
+  },
+  "sensors": {
+    "max_age_seconds": 1800,
+    "min_quorum": 2,
+    "stddev_warning_pct": 25
+  },
+  "mode": "dry_run",
+  "pause_until": null
+}

@@ -4,7 +4,7 @@
         "type": "tab",
         "label": "Ecowitt GW3000 -> InfluxDB",
         "disabled": false,
-        "info": "Flow: sub MQTT `ecowitt/gw3000`, parse JSON Ecowitt multi-sensore, split su canali 1..4, write bucket `garden` measurement `soil_moisture` con tag aiuola=test, position=test.\n\nCredenziali richieste (inserire nella UI Node-RED al primo import):\n- MQTT: user `nodered`, password = valore di MQTT_PWD_NODERED in `.env`\n- InfluxDB: token = valore di INFLUXDB_TOKEN_NODERED_RW in `.env`",
+        "info": "Flow: sub MQTT `ecowitt/gw3000`, parse JSON Ecowitt multi-sensore, split su canali 1..4, write bucket `garden` measurement `soil_moisture` con tag aiuola=test, position=test.\n\nIn step 4 il parse popola anche global.soil_moisture_cache letto dalla decision loop.",
         "env": []
     },
     {
@@ -75,8 +75,8 @@
         "id": "n-fn-parse",
         "type": "function",
         "z": "f-ecowitt",
-        "name": "parse WH51 -> points",
-        "func": "// Input: payload Ecowitt GW3000. Due formati possibili:\n//  (a) stringa form-urlencoded (default firmware GW3000A_V1.2.0)\n//      es: \"PASSKEY=...&soilmoisture1=33&soilbatt1=1.7&...\"\n//  (b) oggetto JSON (inject di test o firmware che pubblica JSON)\n// Campi per canale N (1..4):\n//   soilmoisture{N}  -> umidita' %  (field value, float)\n//   soilbatt{N}      -> tensione V  (field battery_voltage, float)\n//   battery_ok       -> derivato da battery_voltage >= 1.1 (bool)\n// Nota: 'rssi' non viene scritto (field type conflict con schema legacy).\n// Tag: sensor_id=WH51_0N, aiuola=test, position=test.\n\nlet raw = msg.payload;\n\nif (typeof raw === 'string') {\n    const parsed = {};\n    for (const pair of raw.split('&')) {\n        if (!pair) continue;\n        const eq = pair.indexOf('=');\n        if (eq < 0) continue;\n        const k = decodeURIComponent(pair.slice(0, eq));\n        const v = decodeURIComponent(pair.slice(eq + 1).replace(/\\+/g, ' '));\n        parsed[k] = v;\n    }\n    raw = parsed;\n}\n\nif (!raw || typeof raw !== 'object') {\n    node.warn('Payload non riconosciuto, scarto');\n    return null;\n}\n\nconst CHANNELS = [1, 2, 3, 4];\nconst BATTERY_OK_THRESHOLD = 1.1;\nconst out = [];\n\nfor (const ch of CHANNELS) {\n    const mRaw = raw['soilmoisture' + ch];\n    if (mRaw === undefined || mRaw === null || mRaw === '') continue;\n    const value = Number(mRaw);\n    if (!Number.isFinite(value)) continue;\n\n    const battRaw = raw['soilbatt' + ch];\n    const battery_voltage = Number(battRaw);\n    const battery_ok = Number.isFinite(battery_voltage) && battery_voltage >= BATTERY_OK_THRESHOLD;\n\n    out.push([\n        {\n            value: value,\n            battery_voltage: Number.isFinite(battery_voltage) ? battery_voltage : 0,\n            battery_ok: battery_ok\n        },\n        {\n            sensor_id: 'WH51_0' + ch,\n            aiuola: 'test',\n            position: 'test'\n        }\n    ]);\n}\n\nif (out.length === 0) {\n    node.warn('Nessun canale soilmoisture1..4 valido nel payload');\n    return null;\n}\n\nreturn { payload: out, measurement: 'soil_moisture' };\n",
+        "name": "parse WH51 -> points + cache",
+        "func": "// Parse Ecowitt payload (form-urlencoded o JSON), genera points InfluxDB,\n// e popola global.soil_moisture_cache letto dalla decision loop.\n\nlet raw = msg.payload;\nif (typeof raw === 'string') {\n    const parsed = {};\n    for (const pair of raw.split('&')) {\n        if (!pair) continue;\n        const eq = pair.indexOf('=');\n        if (eq < 0) continue;\n        const k = decodeURIComponent(pair.slice(0, eq));\n        const v = decodeURIComponent(pair.slice(eq + 1).replace(/\\+/g, ' '));\n        parsed[k] = v;\n    }\n    raw = parsed;\n}\nif (!raw || typeof raw !== 'object') {\n    node.warn('Payload non riconosciuto, scarto');\n    return null;\n}\n\nconst CHANNELS = [1, 2, 3, 4];\nconst BATTERY_OK_THRESHOLD = 1.1;\nconst out = [];\nconst cache = global.get('soil_moisture_cache') || {};\nconst now = Date.now();\n\nfor (const ch of CHANNELS) {\n    const mRaw = raw['soilmoisture' + ch];\n    if (mRaw === undefined || mRaw === null || mRaw === '') continue;\n    const value = Number(mRaw);\n    if (!Number.isFinite(value)) continue;\n\n    const battRaw = raw['soilbatt' + ch];\n    const battery_voltage = Number(battRaw);\n    const battery_ok = Number.isFinite(battery_voltage) && battery_voltage >= BATTERY_OK_THRESHOLD;\n    const sensor_id = 'WH51_0' + ch;\n\n    out.push([\n        { value, battery_voltage: Number.isFinite(battery_voltage) ? battery_voltage : 0, battery_ok },\n        { sensor_id, aiuola: 'test', position: 'test' }\n    ]);\n\n    cache[sensor_id] = { value, ts: now, battery_ok };\n}\n\nglobal.set('soil_moisture_cache', cache);\n\nif (out.length === 0) {\n    node.warn('Nessun canale soilmoisture1..4 valido nel payload');\n    return null;\n}\n\nreturn { payload: out, measurement: 'soil_moisture' };\n",
         "outputs": 1,
         "timeout": "",
         "noerr": 0,
@@ -174,7 +174,7 @@
         "type": "tab",
         "label": "Valvola SWV (cmd + stato + safety)",
         "disabled": false,
-        "info": "Flow valvola SONOFF SWV (Zigbee via Z2M).\n\nEndpoint HTTP:\n- POST /api/valve/on      -> pub {state:ON}\n- POST /api/valve/off     -> pub {state:OFF}\n- POST /api/valve/toggle  -> pub {state:TOGGLE}\nRisposta JSON: {ok:true, action, sent} oppure 400.\n\nStato:\n- sub zigbee2mqtt/SWV_valvola -> write InfluxDB measurement valve_state (tag valve_id=SWV_01)\n\nSafety timer (n-fn-valve-safety):\n- Quando arriva state=ON arma un setTimeout di SAFETY_MIN minuti (default 15)\n- Allo scadere pubblica {state:OFF} su zigbee2mqtt/SWV_valvola/set (evita allagamento)\n- Ogni nuovo ON resetta il timer; un OFF (manuale o del safety stesso) lo disarma\n- Per test veloci: flow.set('safety_min_override', 0.5) in console (30 sec)\n\nCORS:\n- 'Access-Control-Allow-Origin: *' sugli endpoint per permettere a Grafana Business Forms Panel (origine :3000) di chiamare Node-RED (:1880).\n\nNessuna auth sull'endpoint — LAN domestica. Se in futuro serve, aggiungere check X-API-Key nel function node validate.",
+        "info": "Flow valvola SONOFF SWV (Zigbee via Z2M).\n\nEndpoint HTTP:\n- POST /api/valve/{on,off,toggle}\nIn step 4: source 'manual' marcata in global.last_cmd_source.\n\nStato:\n- sub zigbee2mqtt/SWV_valvola -> write valve_state + aggiorna global.valve_state_runtime + irrigation_events.\n\nSafety timer legge irrigation.safety_timeout_seconds dal config store (default 900s).",
         "env": []
     },
     {
@@ -247,7 +247,7 @@
         "type": "function",
         "z": "f-valve",
         "name": "validate + build MQTT cmd",
-        "func": "// Valida :action e costruisce il payload MQTT per zigbee2mqtt/SWV_valvola/set.\n// Output 1: messaggio MQTT (topic + payload JSON)\n// Output 2: messaggio HTTP response (CORS + JSON body)\n\nconst raw = ((msg.req && msg.req.params && msg.req.params.action) || '').toLowerCase();\nconst MAP = { on: 'ON', off: 'OFF', toggle: 'TOGGLE' };\nconst mqttState = MAP[raw];\n\nmsg.headers = {\n    'Access-Control-Allow-Origin': '*',\n    'Access-Control-Allow-Methods': 'POST, OPTIONS',\n    'Access-Control-Allow-Headers': 'Content-Type'\n};\n\nif (!mqttState) {\n    msg.statusCode = 400;\n    msg.payload = { ok: false, error: `invalid action '${raw}', use on/off/toggle` };\n    node.status({ fill: 'red', shape: 'ring', text: `400 '${raw}'` });\n    return [null, msg];\n}\n\nconst mqttMsg = {\n    topic: 'zigbee2mqtt/SWV_valvola/set',\n    payload: { state: mqttState }\n};\n\n// Marca l'origine del comando per irrigation_events (step 4 imposterà 'auto').\nif (mqttState === 'ON') flow.set('last_cmd_source', 'manual');\n\nmsg.statusCode = 200;\nmsg.payload = { ok: true, action: raw, sent: mqttState };\nnode.status({ fill: 'blue', shape: 'dot', text: `${raw} @ ${new Date().toISOString().substr(11, 8)}` });\n\nreturn [mqttMsg, msg];\n",
+        "func": "// Valida :action e costruisce payload MQTT.\n// Marca origine in global.last_cmd_source per il tracking irrigation_events.\nconst raw = ((msg.req && msg.req.params && msg.req.params.action) || '').toLowerCase();\nconst MAP = { on: 'ON', off: 'OFF', toggle: 'TOGGLE' };\nconst mqttState = MAP[raw];\n\nmsg.headers = {\n    'Access-Control-Allow-Origin': '*',\n    'Access-Control-Allow-Methods': 'POST, OPTIONS',\n    'Access-Control-Allow-Headers': 'Content-Type'\n};\n\nif (!mqttState) {\n    msg.statusCode = 400;\n    msg.payload = { ok: false, error: `invalid action '${raw}', use on/off/toggle` };\n    node.status({ fill: 'red', shape: 'ring', text: `400 '${raw}'` });\n    return [null, msg];\n}\n\nconst mqttMsg = {\n    topic: 'zigbee2mqtt/SWV_valvola/set',\n    payload: { state: mqttState }\n};\n\n// Comando manuale: globalizza il source per il tracking dell'evento.\nif (mqttState === 'ON') global.set('last_cmd_source', 'manual');\n\nmsg.statusCode = 200;\nmsg.payload = { ok: true, action: raw, sent: mqttState };\nnode.status({ fill: 'blue', shape: 'dot', text: `${raw} @ ${new Date().toISOString().substr(11, 8)}` });\n\nreturn [mqttMsg, msg];\n",
         "outputs": 2,
         "timeout": "",
         "noerr": 0,
@@ -314,8 +314,27 @@
                 "n-fn-valve-parse",
                 "n-fn-valve-safety",
                 "n-debug-valve-state",
-                "n-fn-valve-irrigation-event"
+                "n-fn-valve-irrigation-event",
+                "n-fn-valve-runtime-cache"
             ]
+        ]
+    },
+    {
+        "id": "n-fn-valve-runtime-cache",
+        "type": "function",
+        "z": "f-valve",
+        "name": "update global.valve_state_runtime",
+        "func": "// Mantiene global.valve_state_runtime per la decision loop.\n// Cancella anche awaiting_confirmation se la conferma attesa è arrivata.\nconst p = msg.payload;\nif (!p || typeof p !== 'object') return null;\n\nif (p.state === 'ON' || p.state === 'OFF') {\n    global.set('valve_state_runtime', p.state);\n    const awaiting = global.get('awaiting_confirmation');\n    if (awaiting && awaiting.target === p.state) {\n        global.set('awaiting_confirmation', null);\n        global.set('valve_unreachable_consecutive', 0);\n    }\n}\n\n// Cattura reachable per gating apertura.\nif (typeof p.reachable === 'boolean') {\n    global.set('valve_reachable', p.reachable);\n}\n\nreturn null;\n",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 530,
+        "y": 500,
+        "wires": [
+            []
         ]
     },
     {
@@ -323,7 +342,7 @@
         "type": "function",
         "z": "f-valve",
         "name": "parse state -> influx point",
-        "func": "// Dal payload Z2M estrae i campi di interesse e crea un point InfluxDB\n// con tag valve_id=SWV_01 nel measurement 'valve_state'.\nconst p = msg.payload;\nif (!p || typeof p !== 'object') return null;\n\nconst fields = { reachable: true };\nif (p.state === 'ON' || p.state === 'OFF') fields.state = p.state;\nif (Number.isFinite(p.battery)) fields.battery = Number(p.battery);\nif (Number.isFinite(p.linkquality)) fields.linkquality = Number(p.linkquality);\nif (p.current_device_status) fields.current_device_status = String(p.current_device_status);\nif (Number.isFinite(p.flow)) fields.flow = Number(p.flow);\n\n// Se abbiamo solo 'reachable' e nient'altro, non scriviamo (evita noise).\nif (Object.keys(fields).length <= 1) return null;\n\nreturn {\n    payload: [fields, { valve_id: 'SWV_01' }],\n    measurement: 'valve_state'\n};\n",
+        "func": "// Estrae campi e crea point InfluxDB con tag valve_id=SWV_01.\nconst p = msg.payload;\nif (!p || typeof p !== 'object') return null;\n\nconst fields = { reachable: true };\nif (p.state === 'ON' || p.state === 'OFF') fields.state = p.state;\nif (Number.isFinite(p.battery)) fields.battery = Number(p.battery);\nif (Number.isFinite(p.linkquality)) fields.linkquality = Number(p.linkquality);\nif (p.current_device_status) fields.current_device_status = String(p.current_device_status);\nif (Number.isFinite(p.flow)) fields.flow = Number(p.flow);\n\nif (Object.keys(fields).length <= 1) return null;\n\nreturn {\n    payload: [fields, { valve_id: 'SWV_01' }],\n    measurement: 'valve_state'\n};\n",
         "outputs": 1,
         "timeout": "",
         "noerr": 0,
@@ -360,8 +379,8 @@
         "id": "n-fn-valve-safety",
         "type": "function",
         "z": "f-valve",
-        "name": "safety timer auto-OFF",
-        "func": "// Safety: se state=ON arma setTimeout che forza OFF dopo SAFETY_MIN minuti.\n// Ogni nuovo ON resetta il timer. Ogni OFF (manuale o del safety) lo disarma.\n// flow.set('safety_min_override', 0.5) per test veloci (30 sec).\n\nconst SAFETY_MIN = Number(flow.get('safety_min_override')) || 15;\nconst state = msg.payload && msg.payload.state;\n\nlet h = context.get('timer');\nif (h) { clearTimeout(h); context.set('timer', null); }\n\nif (state === 'ON') {\n    const ms = SAFETY_MIN * 60 * 1000;\n    const fires_at = new Date(Date.now() + ms);\n    const handle = setTimeout(() => {\n        node.warn(`SAFETY TIMEOUT ${SAFETY_MIN}min: forcing OFF`);\n        node.send({\n            topic: 'zigbee2mqtt/SWV_valvola/set',\n            payload: { state: 'OFF' },\n            _safety: true\n        });\n        context.set('timer', null);\n        node.status({ fill: 'red', shape: 'dot', text: `TIMEOUT fired @ ${new Date().toISOString().substr(11, 8)}` });\n    }, ms);\n    context.set('timer', handle);\n    node.status({ fill: 'yellow', shape: 'dot', text: `armed ${SAFETY_MIN}m (OFF @ ${fires_at.toISOString().substr(11, 5)})` });\n} else if (state === 'OFF') {\n    node.status({ fill: 'green', shape: 'dot', text: 'disarmed (OFF)' });\n}\n\nreturn null;\n",
+        "name": "safety timer auto-OFF (config-driven)",
+        "func": "// Safety: forza OFF dopo irrigation.safety_timeout_seconds (default 900).\nconst cfg = global.get('irrigation_config') || {};\nconst SAFETY_S = (cfg.irrigation && cfg.irrigation.safety_timeout_seconds) || 900;\nconst state = msg.payload && msg.payload.state;\n\nlet h = context.get('timer');\nif (h) { clearTimeout(h); context.set('timer', null); }\n\nif (state === 'ON') {\n    const ms = SAFETY_S * 1000;\n    const fires_at = new Date(Date.now() + ms);\n    const handle = setTimeout(() => {\n        node.warn(`SAFETY TIMEOUT ${SAFETY_S}s: forcing OFF`);\n        node.send({\n            topic: 'zigbee2mqtt/SWV_valvola/set',\n            payload: { state: 'OFF' },\n            _safety: true\n        });\n        context.set('timer', null);\n        node.status({ fill: 'red', shape: 'dot', text: `TIMEOUT @ ${new Date().toISOString().substr(11, 8)}` });\n    }, ms);\n    context.set('timer', handle);\n    node.status({ fill: 'yellow', shape: 'dot', text: `armed ${SAFETY_S}s (OFF @ ${fires_at.toISOString().substr(11, 5)})` });\n} else if (state === 'OFF') {\n    node.status({ fill: 'green', shape: 'dot', text: 'disarmed (OFF)' });\n}\n\nreturn null;\n",
         "outputs": 1,
         "timeout": "",
         "noerr": 0,
@@ -397,8 +416,8 @@
         "id": "n-fn-valve-irrigation-event",
         "type": "function",
         "z": "f-valve",
-        "name": "traccia evento irrigazione",
-        "func": "// Traccia apertura/chiusura e scrive in irrigation_events.\n// state=ON: memorizza timestamp di apertura e origine del comando.\n// state=OFF: se c'era un'apertura tracciata, calcola durata e scrive il record.\nconst p = msg.payload;\nif (!p || typeof p !== 'object') return null;\nconst state = p.state;\n\nif (state === 'ON') {\n    flow.set('irrigation_open_ts', Date.now());\n    flow.set('irrigation_trigger', flow.get('last_cmd_source') || 'manual');\n    return null;\n}\n\nif (state === 'OFF') {\n    const open_ts = flow.get('irrigation_open_ts');\n    if (!open_ts) return null;\n    const duration_s = Math.round((Date.now() - open_ts) / 1000);\n    flow.set('irrigation_open_ts', null);\n    const trigger = flow.get('irrigation_trigger') || 'manual';\n    flow.set('irrigation_trigger', null);\n    return {\n        payload: [\n            {\n                duration_seconds: duration_s,\n                avg_moisture_at_trigger: 0,\n                reason: trigger === 'manual' ? 'comando manuale' : 'automatico'\n            },\n            { trigger: trigger, valve_id: 'SWV_01' }\n        ],\n        measurement: 'irrigation_events'\n    };\n}\n\nreturn null;\n",
+        "name": "traccia irrigation_events (esteso)",
+        "func": "// Tracking irrigation_events 15-field schema. Triggera su transizioni ON/OFF.\n// state=ON: cattura snapshot meteo/sensori per delta_moisture finale.\n// state=OFF: calcola durata, delta, total_liters; aggiorna last_irrigation_at.\nconst p = msg.payload;\nif (!p || typeof p !== 'object') return null;\nconst state = p.state;\nconst now = Date.now();\nconst cfg = global.get('irrigation_config') || {};\n\nfunction sensorMean() {\n    const cache = global.get('soil_moisture_cache') || {};\n    const max_age_ms = ((cfg.sensors && cfg.sensors.max_age_seconds) || 1800) * 1000;\n    const valid = Object.values(cache).filter(e => (now - e.ts) < max_age_ms).map(e => e.value);\n    if (!valid.length) return { mean: null, count: 0, stddev: 0, high_var: false };\n    const mean = valid.reduce((a, b) => a + b, 0) / valid.length;\n    const variance = valid.reduce((s, v) => s + (v - mean) ** 2, 0) / valid.length;\n    const stddev = Math.sqrt(variance);\n    const stddev_warn = (cfg.sensors && cfg.sensors.stddev_warning_pct) || 25;\n    return { mean: Number(mean.toFixed(2)), count: valid.length, stddev: Number(stddev.toFixed(2)), high_var: stddev > stddev_warn };\n}\n\nfunction weatherSnapshot() {\n    const wc = global.get('weather_cache');\n    const max_age_ms = ((cfg.weather && cfg.weather.cache_max_age_seconds) || 5400) * 1000;\n    if (!wc || !wc.fetched_at) return { rain_forecast_mm: 0, weather_data_age_seconds: 0, weather_available: false };\n    const age = now - wc.fetched_at;\n    return {\n        rain_forecast_mm: Number((wc.precip_next_24h_mm || 0).toFixed(2)),\n        weather_data_age_seconds: Math.round(age / 1000),\n        weather_available: age < max_age_ms\n    };\n}\n\nif (state === 'ON') {\n    const sensors = sensorMean();\n    const weather = weatherSnapshot();\n    const trigger = global.get('last_cmd_source') || 'manual';\n    global.set('irrigation_open', {\n        ts: now,\n        avg_at_trigger: sensors.mean,\n        sensor_count: sensors.count,\n        sensors_high_variance: sensors.high_var,\n        rain_forecast_mm: weather.rain_forecast_mm,\n        weather_data_age_seconds: weather.weather_data_age_seconds,\n        weather_available: weather.weather_available,\n        trigger,\n        dry_run: cfg.mode === 'dry_run'\n    });\n    global.set('in_progress', true);\n    global.set('opened_at', now);\n    return null;\n}\n\nif (state === 'OFF') {\n    const open = global.get('irrigation_open');\n    if (!open) return null;\n    const sensors = sensorMean();\n    const duration_s = Math.round((now - open.ts) / 1000);\n    const delta = sensors.mean !== null && open.avg_at_trigger !== null ? Number((sensors.mean - open.avg_at_trigger).toFixed(2)) : 0;\n    // total_liters: usa global.last_flow_m3h se valido (campo flow del SWV)\n    const flow_m3h = Number(global.get('last_flow_m3h')) || 0;\n    const total_liters = Number(((flow_m3h * 1000) * (duration_s / 3600)).toFixed(2));\n    const reason = open.trigger === 'manual' ? 'comando manuale' : (open.trigger === 'emergency' ? 'emergency' : 'scheduled');\n\n    global.set('irrigation_open', null);\n    global.set('in_progress', false);\n    global.set('opened_at', null);\n    global.set('last_irrigation_at', now);\n    global.set('last_cmd_source', null);\n\n    return {\n        payload: [\n            {\n                state: 'OFF',\n                duration_seconds: duration_s,\n                avg_moisture_at_trigger: open.avg_at_trigger || 0,\n                avg_moisture_at_close: sensors.mean || 0,\n                delta_moisture: delta,\n                reason,\n                rain_forecast_mm: open.rain_forecast_mm,\n                weather_data_age_seconds: open.weather_data_age_seconds,\n                weather_available: open.weather_available,\n                sensor_count: open.sensor_count,\n                sensors_high_variance: open.sensors_high_variance,\n                total_liters,\n                dry_run: open.dry_run\n            },\n            { trigger: open.trigger, valve_id: 'SWV_01' }\n        ],\n        measurement: 'irrigation_events'\n    };\n}\n\nreturn null;\n",
         "outputs": 1,
         "timeout": "",
         "noerr": 0,
@@ -429,6 +448,650 @@
         "bucket": "garden",
         "x": 820,
         "y": 420,
+        "wires": []
+    },
+    {
+        "id": "f-config",
+        "type": "tab",
+        "label": "Config Store (step 4)",
+        "disabled": false,
+        "info": "Config store per irrigation. Persistenza /data/irrigation_config.json, source of truth global.irrigation_config.\n\nEndpoint:\n- GET /api/config -> JSON intero\n- POST /api/config/<dot.path> body {value:...} -> applica + persisti\n- GET /api/state -> snapshot runtime\n- MQTT in orto/config/set/<sec>/<key> payload=raw -> applica\n- MQTT out orto/config/result {ok,key,value|error}\n\nValidazione backend authoritative (vedi nc-fn-validate).",
+        "env": []
+    },
+    {
+        "id": "nc-inject-boot",
+        "type": "inject",
+        "z": "f-config",
+        "name": "load on startup",
+        "props": [
+            {
+                "p": "filename",
+                "v": "/data/irrigation_config.json",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "1",
+        "topic": "",
+        "x": 160,
+        "y": 80,
+        "wires": [
+            [
+                "nc-file-in-config"
+            ]
+        ]
+    },
+    {
+        "id": "nc-file-in-config",
+        "type": "file in",
+        "z": "f-config",
+        "name": "read irrigation_config.json",
+        "filename": "/data/irrigation_config.json",
+        "filenameType": "str",
+        "format": "utf8",
+        "chunk": false,
+        "sendError": true,
+        "encoding": "none",
+        "allProps": false,
+        "x": 400,
+        "y": 80,
+        "wires": [
+            [
+                "nc-fn-load-config"
+            ]
+        ]
+    },
+    {
+        "id": "nc-fn-load-config",
+        "type": "function",
+        "z": "f-config",
+        "name": "parse + set global",
+        "func": "// Parsa JSON config e popola global.irrigation_config.\n// Se il file è mancante o corrotto, carica defaults hardcoded e logga warning.\nconst DEFAULTS = {\n    irrigation: {\n        soglia_apertura_pct: 40,\n        soglia_chiusura_pct: 65,\n        soglia_emergenza_pct: 25,\n        cooldown_seconds: 7200,\n        safety_timeout_seconds: 900,\n        emergency_duration_seconds: 300,\n        finestra_mattina: ['06:00', '08:00'],\n        finestra_sera: ['19:00', '21:00'],\n        polling_interval_seconds: 300,\n        monitoring_interval_seconds: 60\n    },\n    weather: {\n        polling_interval_seconds: 1800,\n        cache_max_age_seconds: 5400,\n        rain_threshold_mm: 5,\n        rain_window_hours: 24,\n        api_url: 'https://api.open-meteo.com/v1/forecast',\n        lat: 45.71722434055733,\n        lon: 9.733793667999565\n    },\n    valve: { command_timeout_seconds: 30, max_retries: 1, unreachable_alert_after: 3 },\n    sensors: { max_age_seconds: 1800, min_quorum: 2, stddev_warning_pct: 25 },\n    mode: 'dry_run',\n    pause_until: null\n};\n\nlet cfg;\ntry {\n    cfg = (typeof msg.payload === 'string') ? JSON.parse(msg.payload) : msg.payload;\n    if (!cfg || typeof cfg !== 'object' || !cfg.irrigation) throw new Error('invalid structure');\n} catch (e) {\n    node.warn(`Config load failed (${e.message}), using defaults`);\n    cfg = DEFAULTS;\n}\nglobal.set('irrigation_config', cfg);\nnode.status({ fill: 'green', shape: 'dot', text: `loaded mode=${cfg.mode}` });\nnode.log(`Config loaded: mode=${cfg.mode}, soglia_apertura=${cfg.irrigation.soglia_apertura_pct}`);\nreturn null;\n",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 670,
+        "y": 80,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "nc-http-in-get-config",
+        "type": "http in",
+        "z": "f-config",
+        "name": "GET /api/config",
+        "url": "/api/config",
+        "method": "get",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 150,
+        "y": 160,
+        "wires": [
+            [
+                "nc-fn-get-config"
+            ]
+        ]
+    },
+    {
+        "id": "nc-fn-get-config",
+        "type": "function",
+        "z": "f-config",
+        "name": "respond config JSON",
+        "func": "msg.headers = { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' };\nmsg.statusCode = 200;\nmsg.payload = global.get('irrigation_config') || {};\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 410,
+        "y": 160,
+        "wires": [
+            [
+                "nc-http-resp-get-config"
+            ]
+        ]
+    },
+    {
+        "id": "nc-http-resp-get-config",
+        "type": "http response",
+        "z": "f-config",
+        "name": "resp 200",
+        "statusCode": "",
+        "headers": {},
+        "x": 660,
+        "y": 160,
+        "wires": []
+    },
+    {
+        "id": "nc-http-in-post-config",
+        "type": "http in",
+        "z": "f-config",
+        "name": "POST /api/config/*",
+        "url": "/api/config/*",
+        "method": "post",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 160,
+        "y": 220,
+        "wires": [
+            [
+                "nc-fn-validate-http"
+            ]
+        ]
+    },
+    {
+        "id": "nc-fn-validate-http",
+        "type": "function",
+        "z": "f-config",
+        "name": "validate + apply (HTTP)",
+        "func": "// Estrae path e value dalla richiesta HTTP, delega a validateAndApply.\nconst pathRaw = (msg.req && msg.req.params && msg.req.params[0]) || '';\nconst path = pathRaw.split('/').filter(Boolean);\nconst value = msg.payload && msg.payload.value;\n\nmsg.headers = { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' };\n\nconst cfg = global.get('irrigation_config');\nif (!cfg) {\n    msg.statusCode = 500;\n    msg.payload = { ok: false, error: 'config not loaded yet' };\n    return [msg, null];\n}\n\nconst result = validateAndApply(path, value, cfg);\nif (!result.ok) {\n    msg.statusCode = 400;\n    msg.payload = { ok: false, key: path.join('.'), error: result.error };\n    return [msg, null];\n}\n\nglobal.set('irrigation_config', result.newCfg);\nmsg.statusCode = 200;\nmsg.payload = { ok: true, key: path.join('.'), value };\nnode.status({ fill: 'blue', shape: 'dot', text: `set ${path.join('.')} @ ${new Date().toISOString().substr(11, 8)}` });\n\n// Output 2: persisti su file\nconst persistMsg = { payload: JSON.stringify(result.newCfg, null, 2), filename: '/data/irrigation_config.json' };\nreturn [msg, persistMsg];\n\nfunction validateAndApply(path, value, cfg) {\n    if (!path.length) return { ok: false, error: 'empty path' };\n    const dot = path.join('.');\n    const PATHS = {\n        'irrigation.soglia_apertura_pct': v => typeof v === 'number' && v > 0 && v < 100,\n        'irrigation.soglia_chiusura_pct': v => typeof v === 'number' && v > 0 && v < 100,\n        'irrigation.soglia_emergenza_pct': v => typeof v === 'number' && v > 0 && v < 100,\n        'irrigation.cooldown_seconds': v => Number.isFinite(v) && v >= 60,\n        'irrigation.safety_timeout_seconds': v => Number.isFinite(v) && v >= 60,\n        'irrigation.emergency_duration_seconds': v => Number.isFinite(v) && v >= 30,\n        'irrigation.polling_interval_seconds': v => Number.isFinite(v) && v >= 30,\n        'irrigation.monitoring_interval_seconds': v => Number.isFinite(v) && v >= 10,\n        'irrigation.finestra_mattina': v => Array.isArray(v) && v.length === 2 && v.every(s => /^\\d{2}:\\d{2}$/.test(s)) && v[0] < v[1],\n        'irrigation.finestra_sera': v => Array.isArray(v) && v.length === 2 && v.every(s => /^\\d{2}:\\d{2}$/.test(s)) && v[0] < v[1],\n        'weather.polling_interval_seconds': v => Number.isFinite(v) && v >= 60,\n        'weather.cache_max_age_seconds': v => Number.isFinite(v) && v >= 60,\n        'weather.rain_threshold_mm': v => Number.isFinite(v) && v >= 0,\n        'weather.rain_window_hours': v => Number.isInteger(v) && v >= 1 && v <= 72,\n        'weather.api_url': v => typeof v === 'string' && v.startsWith('http'),\n        'weather.lat': v => Number.isFinite(v) && v >= -90 && v <= 90,\n        'weather.lon': v => Number.isFinite(v) && v >= -180 && v <= 180,\n        'valve.command_timeout_seconds': v => Number.isFinite(v) && v >= 5,\n        'valve.max_retries': v => Number.isInteger(v) && v >= 0 && v <= 5,\n        'valve.unreachable_alert_after': v => Number.isInteger(v) && v >= 1,\n        'sensors.max_age_seconds': v => Number.isFinite(v) && v >= 60,\n        'sensors.min_quorum': v => Number.isInteger(v) && v >= 1 && v <= 10,\n        'sensors.stddev_warning_pct': v => Number.isFinite(v) && v >= 0 && v <= 100,\n        'mode': v => ['auto', 'paused', 'dry_run'].includes(v),\n        'pause_until': v => v === null || (typeof v === 'string' && !isNaN(Date.parse(v)))\n    };\n    const validator = PATHS[dot];\n    if (!validator) return { ok: false, error: `unknown config path: ${dot}` };\n    if (!validator(value)) return { ok: false, error: `invalid value for ${dot}` };\n\n    const newCfg = JSON.parse(JSON.stringify(cfg));\n    let target = newCfg;\n    for (let i = 0; i < path.length - 1; i++) {\n        if (!(path[i] in target)) return { ok: false, error: `missing parent: ${path.slice(0, i + 1).join('.')}` };\n        target = target[path[i]];\n    }\n    target[path[path.length - 1]] = value;\n\n    const irr = newCfg.irrigation;\n    if (irr.soglia_emergenza_pct >= irr.soglia_apertura_pct) return { ok: false, error: 'emergenza must be < apertura' };\n    if (irr.soglia_apertura_pct >= irr.soglia_chiusura_pct) return { ok: false, error: 'apertura must be < chiusura' };\n    if (irr.emergency_duration_seconds >= irr.safety_timeout_seconds) return { ok: false, error: 'emergency_duration must be < safety_timeout' };\n    if (newCfg.weather.cache_max_age_seconds <= newCfg.weather.polling_interval_seconds) return { ok: false, error: 'weather cache_max_age must be > polling_interval' };\n\n    return { ok: true, newCfg };\n}\n",
+        "outputs": 2,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 430,
+        "y": 220,
+        "wires": [
+            [
+                "nc-http-resp-post-config"
+            ],
+            [
+                "nc-file-out-config"
+            ]
+        ]
+    },
+    {
+        "id": "nc-http-resp-post-config",
+        "type": "http response",
+        "z": "f-config",
+        "name": "resp 200/400",
+        "statusCode": "",
+        "headers": {},
+        "x": 700,
+        "y": 220,
+        "wires": []
+    },
+    {
+        "id": "nc-file-out-config",
+        "type": "file",
+        "z": "f-config",
+        "name": "persist config to file",
+        "filename": "/data/irrigation_config.json",
+        "filenameType": "str",
+        "appendNewline": false,
+        "createDir": false,
+        "overwriteFile": "true",
+        "encoding": "none",
+        "x": 720,
+        "y": 280,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "nc-mqtt-in-config-set",
+        "type": "mqtt in",
+        "z": "f-config",
+        "name": "sub orto/config/set/+/+",
+        "topic": "orto/config/set/#",
+        "qos": "0",
+        "datatype": "auto-detect",
+        "broker": "cfg-mqtt-mosquitto",
+        "nl": false,
+        "rap": false,
+        "rh": 0,
+        "inputs": 0,
+        "x": 170,
+        "y": 360,
+        "wires": [
+            [
+                "nc-fn-validate-mqtt"
+            ]
+        ]
+    },
+    {
+        "id": "nc-fn-validate-mqtt",
+        "type": "function",
+        "z": "f-config",
+        "name": "validate + apply (MQTT)",
+        "func": "// Path da topic: orto/config/set/<rest> -> rest dot.path\nconst topic = msg.topic || '';\nconst prefix = 'orto/config/set/';\nif (!topic.startsWith(prefix)) return null;\nconst pathStr = topic.slice(prefix.length);\nconst path = pathStr.split('/').filter(Boolean);\n\n// Coerce payload: numero/booleano/JSON string/array\nlet value = msg.payload;\nif (typeof value === 'string') {\n    const t = value.trim();\n    if (/^-?\\d+(\\.\\d+)?$/.test(t)) value = Number(t);\n    else if (t === 'true') value = true;\n    else if (t === 'false') value = false;\n    else if (t === 'null') value = null;\n    else if (t.startsWith('[') || t.startsWith('{')) {\n        try { value = JSON.parse(t); } catch (e) { /* keep string */ }\n    }\n}\n\nconst cfg = global.get('irrigation_config');\nif (!cfg) {\n    return { topic: 'orto/config/result', payload: { ok: false, key: pathStr, error: 'config not loaded' } };\n}\n\nconst result = validateAndApply(path, value, cfg);\nif (!result.ok) {\n    node.status({ fill: 'red', shape: 'ring', text: `400 ${pathStr}` });\n    return { topic: 'orto/config/result', payload: { ok: false, key: pathStr.split('/').join('.'), error: result.error } };\n}\nglobal.set('irrigation_config', result.newCfg);\nnode.status({ fill: 'blue', shape: 'dot', text: `set ${pathStr} @ ${new Date().toISOString().substr(11, 8)}` });\n\nconst replyMsg = { topic: 'orto/config/result', payload: { ok: true, key: pathStr.split('/').join('.'), value } };\nconst persistMsg = { payload: JSON.stringify(result.newCfg, null, 2), filename: '/data/irrigation_config.json' };\nreturn [replyMsg, persistMsg];\n\nfunction validateAndApply(path, value, cfg) {\n    if (!path.length) return { ok: false, error: 'empty path' };\n    const dot = path.join('.');\n    const PATHS = {\n        'irrigation.soglia_apertura_pct': v => typeof v === 'number' && v > 0 && v < 100,\n        'irrigation.soglia_chiusura_pct': v => typeof v === 'number' && v > 0 && v < 100,\n        'irrigation.soglia_emergenza_pct': v => typeof v === 'number' && v > 0 && v < 100,\n        'irrigation.cooldown_seconds': v => Number.isFinite(v) && v >= 60,\n        'irrigation.safety_timeout_seconds': v => Number.isFinite(v) && v >= 60,\n        'irrigation.emergency_duration_seconds': v => Number.isFinite(v) && v >= 30,\n        'irrigation.polling_interval_seconds': v => Number.isFinite(v) && v >= 30,\n        'irrigation.monitoring_interval_seconds': v => Number.isFinite(v) && v >= 10,\n        'irrigation.finestra_mattina': v => Array.isArray(v) && v.length === 2 && v.every(s => /^\\d{2}:\\d{2}$/.test(s)) && v[0] < v[1],\n        'irrigation.finestra_sera': v => Array.isArray(v) && v.length === 2 && v.every(s => /^\\d{2}:\\d{2}$/.test(s)) && v[0] < v[1],\n        'weather.polling_interval_seconds': v => Number.isFinite(v) && v >= 60,\n        'weather.cache_max_age_seconds': v => Number.isFinite(v) && v >= 60,\n        'weather.rain_threshold_mm': v => Number.isFinite(v) && v >= 0,\n        'weather.rain_window_hours': v => Number.isInteger(v) && v >= 1 && v <= 72,\n        'weather.api_url': v => typeof v === 'string' && v.startsWith('http'),\n        'weather.lat': v => Number.isFinite(v) && v >= -90 && v <= 90,\n        'weather.lon': v => Number.isFinite(v) && v >= -180 && v <= 180,\n        'valve.command_timeout_seconds': v => Number.isFinite(v) && v >= 5,\n        'valve.max_retries': v => Number.isInteger(v) && v >= 0 && v <= 5,\n        'valve.unreachable_alert_after': v => Number.isInteger(v) && v >= 1,\n        'sensors.max_age_seconds': v => Number.isFinite(v) && v >= 60,\n        'sensors.min_quorum': v => Number.isInteger(v) && v >= 1 && v <= 10,\n        'sensors.stddev_warning_pct': v => Number.isFinite(v) && v >= 0 && v <= 100,\n        'mode': v => ['auto', 'paused', 'dry_run'].includes(v),\n        'pause_until': v => v === null || (typeof v === 'string' && !isNaN(Date.parse(v)))\n    };\n    const validator = PATHS[dot];\n    if (!validator) return { ok: false, error: `unknown config path: ${dot}` };\n    if (!validator(value)) return { ok: false, error: `invalid value for ${dot}` };\n\n    const newCfg = JSON.parse(JSON.stringify(cfg));\n    let target = newCfg;\n    for (let i = 0; i < path.length - 1; i++) {\n        if (!(path[i] in target)) return { ok: false, error: `missing parent: ${path.slice(0, i + 1).join('.')}` };\n        target = target[path[i]];\n    }\n    target[path[path.length - 1]] = value;\n\n    const irr = newCfg.irrigation;\n    if (irr.soglia_emergenza_pct >= irr.soglia_apertura_pct) return { ok: false, error: 'emergenza must be < apertura' };\n    if (irr.soglia_apertura_pct >= irr.soglia_chiusura_pct) return { ok: false, error: 'apertura must be < chiusura' };\n    if (irr.emergency_duration_seconds >= irr.safety_timeout_seconds) return { ok: false, error: 'emergency_duration must be < safety_timeout' };\n    if (newCfg.weather.cache_max_age_seconds <= newCfg.weather.polling_interval_seconds) return { ok: false, error: 'weather cache_max_age must be > polling_interval' };\n\n    return { ok: true, newCfg };\n}\n",
+        "outputs": 2,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 440,
+        "y": 360,
+        "wires": [
+            [
+                "nc-mqtt-out-config-result"
+            ],
+            [
+                "nc-file-out-config"
+            ]
+        ]
+    },
+    {
+        "id": "nc-mqtt-out-config-result",
+        "type": "mqtt out",
+        "z": "f-config",
+        "name": "pub orto/config/result",
+        "topic": "",
+        "qos": "0",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correlationData": "",
+        "expiry": "",
+        "broker": "cfg-mqtt-mosquitto",
+        "x": 720,
+        "y": 360,
+        "wires": []
+    },
+    {
+        "id": "nc-http-in-get-state",
+        "type": "http in",
+        "z": "f-config",
+        "name": "GET /api/state",
+        "url": "/api/state",
+        "method": "get",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 150,
+        "y": 440,
+        "wires": [
+            [
+                "nc-fn-get-state"
+            ]
+        ]
+    },
+    {
+        "id": "nc-fn-get-state",
+        "type": "function",
+        "z": "f-config",
+        "name": "respond runtime state",
+        "func": "// Snapshot dello stato runtime: valvola, irrigazione in corso, mode, weather cache.\nconst cfg = global.get('irrigation_config') || {};\nconst now = Date.now();\nconst wc = global.get('weather_cache');\nconst weather_age_s = wc ? Math.round((now - wc.fetched_at) / 1000) : null;\n\nmsg.headers = { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' };\nmsg.statusCode = 200;\nmsg.payload = {\n    mode: cfg.mode,\n    pause_until: cfg.pause_until,\n    valve_state_runtime: global.get('valve_state_runtime'),\n    valve_reachable: global.get('valve_reachable'),\n    valve_unreachable_consecutive: global.get('valve_unreachable_consecutive') || 0,\n    in_progress: global.get('in_progress') || false,\n    opened_at: global.get('opened_at'),\n    last_irrigation_at: global.get('last_irrigation_at'),\n    weather_cache: wc ? {\n        ...wc,\n        age_seconds: weather_age_s,\n        available: weather_age_s !== null && weather_age_s * 1000 < (cfg.weather.cache_max_age_seconds * 1000)\n    } : null,\n    sensors_cached: Object.keys(global.get('soil_moisture_cache') || {}).length,\n    last_decision_at: global.get('last_decision_at'),\n    last_decision_outcome: global.get('last_decision_outcome')\n};\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 410,
+        "y": 440,
+        "wires": [
+            [
+                "nc-http-resp-get-state"
+            ]
+        ]
+    },
+    {
+        "id": "nc-http-resp-get-state",
+        "type": "http response",
+        "z": "f-config",
+        "name": "resp 200",
+        "statusCode": "",
+        "headers": {},
+        "x": 660,
+        "y": 440,
+        "wires": []
+    },
+    {
+        "id": "f-weather",
+        "type": "tab",
+        "label": "Weather (Open-Meteo)",
+        "disabled": false,
+        "info": "Polling Open-Meteo ogni weather.polling_interval_seconds (default 1800).\nCache in global.weather_cache + write su weather_forecast.\nFallback: API down -> cache non svuotata, decisione marcata weather_available=false dopo cache_max_age.",
+        "env": []
+    },
+    {
+        "id": "nw-inject-tick",
+        "type": "inject",
+        "z": "f-weather",
+        "name": "tick 60s",
+        "props": [],
+        "repeat": "60",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "20",
+        "topic": "",
+        "x": 150,
+        "y": 100,
+        "wires": [
+            [
+                "nw-fn-scheduler"
+            ]
+        ]
+    },
+    {
+        "id": "nw-fn-scheduler",
+        "type": "function",
+        "z": "f-weather",
+        "name": "scheduler",
+        "func": "// Decide se è ora di pollare Open-Meteo.\nconst cfg = global.get('irrigation_config');\nif (!cfg) return null;\nconst now = Date.now();\nconst last = global.get('last_weather_poll_at') || 0;\nconst interval_ms = (cfg.weather.polling_interval_seconds || 1800) * 1000;\nif ((now - last) < interval_ms) return null;\n\nglobal.set('last_weather_poll_at', now);\n\nconst lat = cfg.weather.lat;\nconst lon = cfg.weather.lon;\nif (typeof lat !== 'number' || typeof lon !== 'number') {\n    node.warn('weather.lat/lon non configurati, skip polling');\n    return null;\n}\n\nconst url = `${cfg.weather.api_url}?latitude=${lat}&longitude=${lon}&hourly=precipitation,temperature_2m,relative_humidity_2m&forecast_days=2&timezone=Europe%2FRome`;\nmsg.url = url;\nmsg.method = 'GET';\nmsg._t0 = now;\nnode.status({ fill: 'blue', shape: 'dot', text: `polling @ ${new Date().toISOString().substr(11, 8)}` });\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 320,
+        "y": 100,
+        "wires": [
+            [
+                "nw-http-request"
+            ]
+        ]
+    },
+    {
+        "id": "nw-http-request",
+        "type": "http request",
+        "z": "f-weather",
+        "name": "GET Open-Meteo",
+        "method": "use",
+        "ret": "obj",
+        "paytoqs": "ignore",
+        "url": "",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 510,
+        "y": 100,
+        "wires": [
+            [
+                "nw-fn-parse-cache"
+            ]
+        ]
+    },
+    {
+        "id": "nw-fn-parse-cache",
+        "type": "function",
+        "z": "f-weather",
+        "name": "parse + cache + influx point",
+        "func": "// Parse risposta Open-Meteo, calcola scalari, aggiorna cache, prepara point.\nconst body = msg.payload;\nconst t0 = msg._t0 || Date.now();\nconst latency_ms = Date.now() - t0;\n\nif (msg.statusCode !== 200 || !body || !body.hourly) {\n    node.warn(`Open-Meteo fail: status=${msg.statusCode}`);\n    node.status({ fill: 'red', shape: 'ring', text: `fail ${msg.statusCode || '-'}` });\n    return null;\n}\n\nconst h = body.hourly;\nconst precip = Array.isArray(h.precipitation) ? h.precipitation : [];\nconst temp = Array.isArray(h.temperature_2m) ? h.temperature_2m : [];\nconst hum = Array.isArray(h.relative_humidity_2m) ? h.relative_humidity_2m : [];\n\nconst sum = (arr, n) => arr.slice(0, n).reduce((a, v) => a + (Number.isFinite(v) ? v : 0), 0);\nconst maxN = (arr, n) => {\n    const slice = arr.slice(0, n).filter(Number.isFinite);\n    return slice.length ? Math.max(...slice) : 0;\n};\n\nconst data = {\n    precip_next_24h_mm: Number(sum(precip, 24).toFixed(2)),\n    precip_next_6h_mm: Number(sum(precip, 6).toFixed(2)),\n    temp_max_next_12h_c: Number(maxN(temp, 12).toFixed(1)),\n    humidity_now_pct: Number((hum[0] || 0).toFixed(1)),\n    api_latency_ms: latency_ms,\n    fetched_at: Date.now()\n};\n\nglobal.set('weather_cache', data);\nnode.status({ fill: 'green', shape: 'dot', text: `rain24h=${data.precip_next_24h_mm}mm @ ${new Date().toISOString().substr(11, 5)}` });\n\nreturn {\n    payload: [\n        {\n            precip_next_24h_mm: data.precip_next_24h_mm,\n            precip_next_6h_mm: data.precip_next_6h_mm,\n            temp_max_next_12h_c: data.temp_max_next_12h_c,\n            humidity_now_pct: data.humidity_now_pct,\n            api_latency_ms: data.api_latency_ms\n        },\n        { source: 'openmeteo', location: 'orto' }\n    ],\n    measurement: 'weather_forecast'\n};\n",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 740,
+        "y": 100,
+        "wires": [
+            [
+                "nw-influx-out"
+            ]
+        ]
+    },
+    {
+        "id": "nw-influx-out",
+        "type": "influxdb out",
+        "z": "f-weather",
+        "influxdb": "cfg-influxdb",
+        "name": "write garden/weather_forecast",
+        "measurement": "weather_forecast",
+        "precision": "",
+        "retentionPolicy": "",
+        "database": "database",
+        "precisionV18FluxV20": "ms",
+        "retentionPolicyV18Flux": "",
+        "org": "orto-digitale",
+        "bucket": "garden",
+        "x": 990,
+        "y": 100,
+        "wires": []
+    },
+    {
+        "id": "f-recovery",
+        "type": "tab",
+        "label": "Boot Recovery (step 4)",
+        "disabled": false,
+        "info": "Eseguito una volta all'avvio Node-RED dopo subscribe MQTT e load config.\nLegge global.valve_state_runtime e ultimi eventi InfluxDB, applica una delle 5 azioni di recovery (vedi step4 §9).",
+        "env": []
+    },
+    {
+        "id": "nr-inject-boot",
+        "type": "inject",
+        "z": "f-recovery",
+        "name": "boot+45s",
+        "props": [],
+        "repeat": "",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "45",
+        "topic": "",
+        "x": 140,
+        "y": 100,
+        "wires": [
+            [
+                "nr-influx-in-last-event"
+            ]
+        ]
+    },
+    {
+        "id": "nr-influx-in-last-event",
+        "type": "influxdb in",
+        "z": "f-recovery",
+        "influxdb": "cfg-influxdb",
+        "name": "query last irrigation_event",
+        "query": "from(bucket:\"garden\") |> range(start: -2d) |> filter(fn:(r) => r._measurement == \"irrigation_events\") |> last()",
+        "rawOutput": false,
+        "precision": "",
+        "retentionPolicy": "",
+        "org": "orto-digitale",
+        "x": 380,
+        "y": 100,
+        "wires": [
+            [
+                "nr-fn-recover"
+            ]
+        ]
+    },
+    {
+        "id": "nr-fn-recover",
+        "type": "function",
+        "z": "f-recovery",
+        "name": "resolve recovery scenario",
+        "func": "// Risolve uno dei 5 scenari (vedi step4 §9).\n// Input msg.payload: array di righe Flux (oggetti con _field, _value, _time).\nconst rows = Array.isArray(msg.payload) ? msg.payload : (Array.isArray(msg.payload && msg.payload[0]) ? msg.payload[0] : []);\nconst valve = global.get('valve_state_runtime');\nconst in_progress = !!global.get('in_progress');\nconst opened_at = global.get('opened_at');\nconst cfg = global.get('irrigation_config') || {};\nconst safetyMs = ((cfg.irrigation && cfg.irrigation.safety_timeout_seconds) || 900) * 1000;\nconst now = Date.now();\n\n// Aggrega l'ultimo evento (Flux ritorna 1 riga per field).\nlet lastEvent = null;\nif (Array.isArray(rows) && rows.length) {\n    const byTime = {};\n    for (const r of rows) {\n        const t = r._time;\n        if (!byTime[t]) byTime[t] = { _time: t, fields: {} };\n        byTime[t].fields[r._field] = r._value;\n    }\n    const sorted = Object.values(byTime).sort((a, b) => new Date(b._time) - new Date(a._time));\n    lastEvent = sorted[0];\n}\n\nlet scenario = 'unknown';\nlet outMsgs = [];\n\nconst lastEventState = lastEvent && lastEvent.fields ? lastEvent.fields.state : null;\nconst lastEventTime = lastEvent ? new Date(lastEvent._time).getTime() : null;\nconst lastEventAge = lastEventTime ? (now - lastEventTime) : null;\n\n// Hot-reload: se in_progress è già coerente in global, non interferire.\nif (in_progress && opened_at && (now - opened_at) < safetyMs) {\n    scenario = 'already_tracked_by_runtime';\n    node.warn(`[recovery] scenario=${scenario} (in_progress=true, age=${Math.round((now-opened_at)/1000)}s) — no action`);\n    node.status({ fill: 'green', shape: 'ring', text: scenario });\n    return [null, null];\n}\n\n// MQTT non ha ancora pubblicato stato: defer (no action).\nif (valve === undefined || valve === null) {\n    scenario = 'deferred_no_mqtt_state';\n    node.warn(`[recovery] scenario=${scenario} (valve_state non ricevuto da Z2M, lastEvent=${lastEventState}) — no action, ricalcolo al prossimo tick di decisione`);\n    node.status({ fill: 'grey', shape: 'ring', text: scenario });\n    return [null, null];\n}\n\nif (valve === 'OFF' && (!lastEvent || lastEventState === 'OFF' || lastEventState === undefined)) {\n    scenario = 'normal';\n    global.set('in_progress', false);\n} else if (valve === 'ON' && lastEventState === 'ON' && lastEventAge !== null && lastEventAge < safetyMs) {\n    scenario = 'recovery_in_progress';\n    global.set('in_progress', true);\n    global.set('opened_at', lastEventTime);\n    global.set('target_duration_seconds', (cfg.irrigation && cfg.irrigation.safety_timeout_seconds) || 900);\n} else if (valve === 'ON' && lastEventState === 'ON' && lastEventAge !== null && lastEventAge >= safetyMs) {\n    scenario = 'recovery_timeout';\n    outMsgs.push({ topic: 'zigbee2mqtt/SWV_valvola/set', payload: { state: 'OFF' }, _recovery: true });\n    outMsgs.push({\n        payload: [\n            { state: 'OFF', duration_seconds: Math.round(lastEventAge / 1000), reason: 'recovery_timeout' },\n            { trigger: 'orphan_recovery', valve_id: 'SWV_01' }\n        ],\n        measurement: 'irrigation_events'\n    });\n    global.set('in_progress', false);\n} else if (valve === 'ON' && (lastEventState === 'OFF' || !lastEvent)) {\n    scenario = 'orphan_valve_on';\n    outMsgs.push({ topic: 'zigbee2mqtt/SWV_valvola/set', payload: { state: 'OFF' }, _recovery: true });\n    outMsgs.push({\n        payload: [\n            { state: 'OFF', duration_seconds: 0, reason: 'orphan_recovery' },\n            { trigger: 'orphan_recovery', valve_id: 'SWV_01' }\n        ],\n        measurement: 'irrigation_events'\n    });\n    global.set('in_progress', false);\n} else if (valve === 'OFF' && lastEventState === 'ON') {\n    scenario = 'recovery_lost';\n    outMsgs.push({\n        payload: [\n            { state: 'OFF', duration_seconds: lastEventAge ? Math.round(lastEventAge / 1000) : 0, reason: 'recovery_lost' },\n            { trigger: 'orphan_recovery', valve_id: 'SWV_01' }\n        ],\n        measurement: 'irrigation_events'\n    });\n    global.set('in_progress', false);\n} else {\n    scenario = `unhandled (valve=${valve}, lastEvent=${lastEventState})`;\n    global.set('in_progress', false);\n}\n\nnode.warn(`[recovery] scenario=${scenario}`);\nnode.status({ fill: scenario === 'normal' ? 'green' : 'yellow', shape: 'dot', text: scenario });\n\n// Output 1: comandi MQTT (force close), Output 2: punti InfluxDB (eventi anomali)\nconst mqttOuts = outMsgs.filter(m => m.topic);\nconst influxOuts = outMsgs.filter(m => m.measurement);\nreturn [mqttOuts.length ? mqttOuts : null, influxOuts.length ? influxOuts : null];\n",
+        "outputs": 2,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 660,
+        "y": 100,
+        "wires": [
+            [
+                "nr-mqtt-out-force-close"
+            ],
+            [
+                "nr-influx-out-anomaly"
+            ]
+        ]
+    },
+    {
+        "id": "nr-mqtt-out-force-close",
+        "type": "mqtt out",
+        "z": "f-recovery",
+        "name": "force close",
+        "topic": "",
+        "qos": "0",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correlationData": "",
+        "expiry": "",
+        "broker": "cfg-mqtt-mosquitto",
+        "x": 920,
+        "y": 80,
+        "wires": []
+    },
+    {
+        "id": "nr-influx-out-anomaly",
+        "type": "influxdb out",
+        "z": "f-recovery",
+        "influxdb": "cfg-influxdb",
+        "name": "write anomaly to irrigation_events",
+        "measurement": "irrigation_events",
+        "precision": "",
+        "retentionPolicy": "",
+        "database": "database",
+        "precisionV18FluxV20": "ms",
+        "retentionPolicyV18Flux": "",
+        "org": "orto-digitale",
+        "bucket": "garden",
+        "x": 970,
+        "y": 140,
+        "wires": []
+    },
+    {
+        "id": "f-decision",
+        "type": "tab",
+        "label": "Decision Loop (step 4)",
+        "disabled": false,
+        "info": "Tick ogni 60s. Dispatcher:\n- in_progress=true -> monitoring (chiusura per soglia o timeout)\n- in_progress=false E now-last_decision >= polling_interval -> decision\n\nAlgoritmo: vedi step4 §7. Logga ogni decisione (anche skip) su irrigation_events.",
+        "env": []
+    },
+    {
+        "id": "nd-inject-tick",
+        "type": "inject",
+        "z": "f-decision",
+        "name": "tick 60s",
+        "props": [],
+        "repeat": "60",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "30",
+        "topic": "",
+        "x": 150,
+        "y": 100,
+        "wires": [
+            [
+                "nd-fn-tick"
+            ]
+        ]
+    },
+    {
+        "id": "nd-fn-tick",
+        "type": "function",
+        "z": "f-decision",
+        "name": "decision/monitoring dispatcher",
+        "func": "// Dispatcher 60s. Branch in_progress -> monitoring, altrimenti -> decision.\nconst cfg = global.get('irrigation_config');\nif (!cfg) { node.status({ fill: 'grey', shape: 'ring', text: 'no config' }); return null; }\n\n// Auto-resume da pausa scaduta\nif (cfg.pause_until && new Date(cfg.pause_until).getTime() <= Date.now()) {\n    cfg.pause_until = null;\n    global.set('irrigation_config', cfg);\n    node.warn('pause_until expired, resuming auto');\n}\n\nconst in_progress = !!global.get('in_progress');\nif (in_progress) return [null, msg]; // monitoring branch\n\nconst now = Date.now();\nconst last = global.get('last_decision_at') || 0;\nconst interval_ms = (cfg.irrigation.polling_interval_seconds || 300) * 1000;\nif ((now - last) < interval_ms) return null;\nglobal.set('last_decision_at', now);\nreturn [msg, null]; // decision branch\n",
+        "outputs": 2,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 380,
+        "y": 100,
+        "wires": [
+            [
+                "nd-fn-decision"
+            ],
+            [
+                "nd-fn-monitoring"
+            ]
+        ]
+    },
+    {
+        "id": "nd-fn-decision",
+        "type": "function",
+        "z": "f-decision",
+        "name": "decision logic",
+        "func": "// Algoritmo step 4 §7. Output:\n//  [0] mqtt out (publish ON su zigbee2mqtt o mock)\n//  [1] influxdb out (skip event o open event)\n//  [2] debug status\nconst cfg = global.get('irrigation_config');\nif (!cfg) return null;\nconst now = Date.now();\n\nfunction sensorStats() {\n    const cache = global.get('soil_moisture_cache') || {};\n    const max_age_ms = cfg.sensors.max_age_seconds * 1000;\n    const valid = Object.values(cache).filter(e => (now - e.ts) < max_age_ms).map(e => e.value);\n    if (valid.length < cfg.sensors.min_quorum) return { count: valid.length, mean: null, stddev: 0, high_var: false };\n    const mean = valid.reduce((a, b) => a + b, 0) / valid.length;\n    const variance = valid.reduce((s, v) => s + (v - mean) ** 2, 0) / valid.length;\n    const stddev = Math.sqrt(variance);\n    return { count: valid.length, mean: Number(mean.toFixed(2)), stddev: Number(stddev.toFixed(2)), high_var: stddev > cfg.sensors.stddev_warning_pct };\n}\n\nfunction inWindow(date, win) {\n    const hh = date.getHours().toString().padStart(2, '0');\n    const mm = date.getMinutes().toString().padStart(2, '0');\n    const cur = `${hh}:${mm}`;\n    return cur >= win[0] && cur < win[1];\n}\n\nfunction inAnyWindow(date) {\n    return inWindow(date, cfg.irrigation.finestra_mattina) || inWindow(date, cfg.irrigation.finestra_sera);\n}\n\nfunction weatherInfo() {\n    const wc = global.get('weather_cache');\n    if (!wc || !wc.fetched_at) return { available: false, age: 0, rain_24h: 0 };\n    const age = now - wc.fetched_at;\n    return {\n        available: age < cfg.weather.cache_max_age_seconds * 1000,\n        age: Math.round(age / 1000),\n        rain_24h: wc.precip_next_24h_mm || 0\n    };\n}\n\nfunction skipEvent(reason, ctx) {\n    return {\n        payload: [\n            {\n                state: 'SKIP',\n                duration_seconds: 0,\n                avg_moisture_at_trigger: ctx.sensors.mean || 0,\n                skip_reason: reason,\n                rain_forecast_mm: ctx.weather.rain_24h,\n                weather_data_age_seconds: ctx.weather.age,\n                weather_available: ctx.weather.available,\n                sensor_count: ctx.sensors.count,\n                sensors_high_variance: ctx.sensors.high_var,\n                dry_run: cfg.mode === 'dry_run'\n            },\n            { trigger: 'skip', valve_id: 'SWV_01' }\n        ],\n        measurement: 'irrigation_events'\n    };\n}\n\nconst sensors = sensorStats();\nconst weather = weatherInfo();\nconst ctx = { sensors, weather };\n\n// 1) Pause / mode\nif (cfg.mode === 'paused' || (cfg.pause_until && new Date(cfg.pause_until).getTime() > now)) {\n    global.set('last_decision_outcome', 'skip:paused');\n    node.status({ fill: 'grey', shape: 'dot', text: 'paused' });\n    return [null, skipEvent('paused', ctx), null];\n}\n\n// 2) Quorum sensori\nif (sensors.count < cfg.sensors.min_quorum) {\n    global.set('last_decision_outcome', 'skip:no_quorum');\n    node.status({ fill: 'red', shape: 'ring', text: `no_quorum (${sensors.count})` });\n    return [null, skipEvent('no_quorum', ctx), null];\n}\n\n// 3) Umidità sufficiente: nessun log evento (no \"non-decisione\")\nif (sensors.mean >= cfg.irrigation.soglia_apertura_pct) {\n    global.set('last_decision_outcome', `ok:moist=${sensors.mean}`);\n    node.status({ fill: 'green', shape: 'dot', text: `moist=${sensors.mean}% (>=${cfg.irrigation.soglia_apertura_pct})` });\n    return null;\n}\n\nconst is_emergency = sensors.mean < cfg.irrigation.soglia_emergenza_pct;\n\n// 4) Orario (saltato se emergenza)\nif (!is_emergency && !inAnyWindow(new Date(now))) {\n    global.set('last_decision_outcome', 'skip:out_of_window');\n    node.status({ fill: 'grey', shape: 'dot', text: 'out_of_window' });\n    return [null, skipEvent('out_of_window', ctx), null];\n}\n\n// 5) Cooldown (sempre)\nconst last_irr = global.get('last_irrigation_at') || 0;\nif ((now - last_irr) < cfg.irrigation.cooldown_seconds * 1000) {\n    global.set('last_decision_outcome', 'skip:cooldown');\n    node.status({ fill: 'grey', shape: 'dot', text: 'cooldown' });\n    return [null, skipEvent('cooldown', ctx), null];\n}\n\n// 6) Pioggia (solo se cache disponibile)\nif (weather.available && weather.rain_24h >= cfg.weather.rain_threshold_mm) {\n    global.set('last_decision_outcome', `skip:rain_delay(${weather.rain_24h}mm)`);\n    node.status({ fill: 'blue', shape: 'dot', text: `rain_delay (${weather.rain_24h}mm)` });\n    return [null, skipEvent('rain_delay', ctx), null];\n}\n\n// 7) Reachable check\nif (global.get('valve_reachable') === false) {\n    const counter = (global.get('valve_unreachable_consecutive') || 0) + 1;\n    global.set('valve_unreachable_consecutive', counter);\n    if (counter >= cfg.valve.unreachable_alert_after) {\n        node.warn(`[ALERT] valve unreachable for ${counter} consecutive ticks`);\n    }\n    global.set('last_decision_outcome', `skip:valve_unreachable(${counter})`);\n    node.status({ fill: 'red', shape: 'dot', text: `unreachable x${counter}` });\n    return [null, skipEvent('valve_unreachable', ctx), null];\n}\n\n// 8) APRI\nconst trigger = is_emergency ? 'emergency' : 'auto';\nconst target_duration = is_emergency ? cfg.irrigation.emergency_duration_seconds : cfg.irrigation.safety_timeout_seconds;\n\nglobal.set('last_cmd_source', trigger);\nglobal.set('target_duration_seconds', target_duration);\nglobal.set('last_decision_outcome', `open:${trigger}@${sensors.mean}%`);\n\nconst topic = cfg.mode === 'dry_run' ? 'orto/dryrun/valve/set' : 'zigbee2mqtt/SWV_valvola/set';\nnode.warn(`[DECISION] open trigger=${trigger} mean=${sensors.mean}% mode=${cfg.mode} target=${target_duration}s`);\nnode.status({ fill: 'yellow', shape: 'dot', text: `OPEN ${trigger} ${sensors.mean}%` });\n\nconst openMsg = { topic, payload: { state: 'ON' } };\n\n// In dry_run, simuliamo l'apertura senza aspettare conferma valvola reale.\n// Pubblichiamo subito il record di apertura su irrigation_events e settiamo in_progress.\nif (cfg.mode === 'dry_run') {\n    global.set('in_progress', true);\n    global.set('opened_at', now);\n    global.set('irrigation_open', {\n        ts: now,\n        avg_at_trigger: sensors.mean,\n        sensor_count: sensors.count,\n        sensors_high_variance: sensors.high_var,\n        rain_forecast_mm: weather.rain_24h,\n        weather_data_age_seconds: weather.age,\n        weather_available: weather.available,\n        trigger,\n        dry_run: true\n    });\n    const openEvent = {\n        payload: [\n            {\n                state: 'ON',\n                duration_seconds: 0,\n                avg_moisture_at_trigger: sensors.mean,\n                rain_forecast_mm: weather.rain_24h,\n                weather_data_age_seconds: weather.age,\n                weather_available: weather.available,\n                sensor_count: sensors.count,\n                sensors_high_variance: sensors.high_var,\n                dry_run: true,\n                reason: trigger\n            },\n            { trigger, valve_id: 'SWV_01' }\n        ],\n        measurement: 'irrigation_events'\n    };\n    return [openMsg, openEvent, null];\n}\n\n// Mode auto: il publish va sul topic reale; il tracking ON/OFF avviene\n// in n-fn-valve-irrigation-event al ritorno di stato dalla valvola.\nreturn [openMsg, null, null];\n",
+        "outputs": 3,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 640,
+        "y": 60,
+        "wires": [
+            [
+                "nd-mqtt-out-cmd"
+            ],
+            [
+                "nd-influx-out-event"
+            ],
+            []
+        ]
+    },
+    {
+        "id": "nd-fn-monitoring",
+        "type": "function",
+        "z": "f-decision",
+        "name": "monitoring logic",
+        "func": "// Tick durante irrigazione: chiude se soglia raggiunta o timeout.\nconst cfg = global.get('irrigation_config');\nif (!cfg) return null;\nconst now = Date.now();\nconst opened_at = global.get('opened_at') || now;\nconst target = global.get('target_duration_seconds') || cfg.irrigation.safety_timeout_seconds;\nconst elapsed_s = (now - opened_at) / 1000;\n\nfunction sensorStats() {\n    const cache = global.get('soil_moisture_cache') || {};\n    const max_age_ms = cfg.sensors.max_age_seconds * 1000;\n    const valid = Object.values(cache).filter(e => (now - e.ts) < max_age_ms).map(e => e.value);\n    if (valid.length < cfg.sensors.min_quorum) return { count: valid.length, mean: null };\n    const mean = valid.reduce((a, b) => a + b, 0) / valid.length;\n    return { count: valid.length, mean: Number(mean.toFixed(2)) };\n}\n\nconst sensors = sensorStats();\nlet shouldClose = null;\nif (sensors.mean !== null && sensors.mean > cfg.irrigation.soglia_chiusura_pct) shouldClose = 'threshold_reached';\nif (elapsed_s > target) shouldClose = 'safety_timeout';\n\nif (!shouldClose) {\n    node.status({ fill: 'yellow', shape: 'dot', text: `irrigating ${Math.round(elapsed_s)}s mean=${sensors.mean}` });\n    return null;\n}\n\nconst topic = cfg.mode === 'dry_run' ? 'orto/dryrun/valve/set' : 'zigbee2mqtt/SWV_valvola/set';\nnode.warn(`[MONITORING] close reason=${shouldClose} elapsed=${Math.round(elapsed_s)}s mean=${sensors.mean}`);\nnode.status({ fill: 'green', shape: 'dot', text: `CLOSE ${shouldClose}` });\n\nconst closeMqtt = { topic, payload: { state: 'OFF' } };\n\n// In dry_run scriviamo il record di chiusura qui (n-fn-valve-irrigation-event\n// non riceverà l'evento OFF dalla valvola reale).\nif (cfg.mode === 'dry_run') {\n    const open = global.get('irrigation_open') || {};\n    const duration_s = Math.round(elapsed_s);\n    const delta = (sensors.mean !== null && open.avg_at_trigger != null) ? Number((sensors.mean - open.avg_at_trigger).toFixed(2)) : 0;\n    global.set('irrigation_open', null);\n    global.set('in_progress', false);\n    global.set('opened_at', null);\n    global.set('last_irrigation_at', now);\n    global.set('last_cmd_source', null);\n    const closeEvent = {\n        payload: [\n            {\n                state: 'OFF',\n                duration_seconds: duration_s,\n                avg_moisture_at_trigger: open.avg_at_trigger || 0,\n                avg_moisture_at_close: sensors.mean || 0,\n                delta_moisture: delta,\n                reason: shouldClose,\n                rain_forecast_mm: open.rain_forecast_mm || 0,\n                weather_data_age_seconds: open.weather_data_age_seconds || 0,\n                weather_available: !!open.weather_available,\n                sensor_count: sensors.count,\n                dry_run: true\n            },\n            { trigger: open.trigger || 'auto', valve_id: 'SWV_01' }\n        ],\n        measurement: 'irrigation_events'\n    };\n    return [closeMqtt, closeEvent];\n}\n\nreturn [closeMqtt, null];\n",
+        "outputs": 2,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 630,
+        "y": 160,
+        "wires": [
+            [
+                "nd-mqtt-out-cmd"
+            ],
+            [
+                "nd-influx-out-event"
+            ]
+        ]
+    },
+    {
+        "id": "nd-mqtt-out-cmd",
+        "type": "mqtt out",
+        "z": "f-decision",
+        "name": "pub valve set (real or mock)",
+        "topic": "",
+        "qos": "0",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correlationData": "",
+        "expiry": "",
+        "broker": "cfg-mqtt-mosquitto",
+        "x": 950,
+        "y": 100,
+        "wires": []
+    },
+    {
+        "id": "nd-influx-out-event",
+        "type": "influxdb out",
+        "z": "f-decision",
+        "influxdb": "cfg-influxdb",
+        "name": "write garden/irrigation_events",
+        "measurement": "irrigation_events",
+        "precision": "",
+        "retentionPolicy": "",
+        "database": "database",
+        "precisionV18FluxV20": "ms",
+        "retentionPolicyV18Flux": "",
+        "org": "orto-digitale",
+        "bucket": "garden",
+        "x": 970,
+        "y": 160,
         "wires": []
     }
 ]
