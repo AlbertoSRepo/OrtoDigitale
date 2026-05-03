@@ -349,3 +349,38 @@ Rimandato a step 4+, 5 o 6:
 - Modello evapotraspirazione
 
 ---
+
+## Implementazione
+**Stato:** ✅ COMPLETATO — 2026-05-03
+**Commit di riferimento:** `feat(nodered): step 4 logica irrigazione automatica` (c4aa998) + `fix(nodered): boot recovery con scenari hot-reload e mqtt deferred` (59b14fe)
+
+**Note:**
+
+*Cosa funziona end-to-end (verificato post-deploy):*
+- Config store: `irrigation_config.json` letto al boot, `mode=dry_run, soglia_apertura=40` confermato dai log
+- Endpoint HTTP: `GET /api/config` ritorna JSON completo, `POST /api/config/<path>` applica e persiste con validazione cross-field (es. `soglia_emergenza < soglia_apertura` rifiutato 400)
+- Endpoint MQTT: `orto/config/set/mode` con payload `paused` ha settato correttamente `mode=paused` (verificato via `/api/state`)
+- Open-Meteo: prima chiamata riuscita, cache `precip_next_24h_mm=0, temp_max_next_12h_c=20.4, humidity_now_pct=52`, latency 222ms
+- `weather_forecast` su InfluxDB: 5 campi scritti correttamente con tag `source=openmeteo, location=orto`
+- Decision loop: prima decisione `[DECISION] open trigger=auto mean=39.67% mode=dry_run target=900s` con publish su topic mock `orto/dryrun/valve/set`
+- `irrigation_events` esteso: tutti i 12 campi scritti (state, avg_moisture_at_trigger, dry_run, duration_seconds, rain_forecast_mm, reason, sensor_count, sensors_high_variance, weather_available, weather_data_age_seconds, total_liters omesso al primo open perché flow=0, e altri)
+- Boot recovery: scenario `already_tracked_by_runtime` riconosciuto correttamente (in_progress=true, age=15s, no action)
+- Healthcheck verify_rpi5.sh: 10/10 verdi
+
+*Cosa cambia rispetto alla spec:*
+- `total_liters`: scritto solo nell'evento di chiusura (richiede `flow` m³/h dalla valvola, disponibile solo durante irrigazione reale; in dry_run è 0)
+- `safety_min_override` legacy: rimpiazzato da `irrigation.safety_timeout_seconds` letto a runtime dal config store
+- Recovery: aggiunti due scenari oltre i 5 della spec (`already_tracked_by_runtime` e `deferred_no_mqtt_state`) per gestire deploy-via-API e cold boot prima del primo messaggio Z2M
+
+*Footgun ricordati durante il deploy:*
+- Path effettivo del flow su RPi è `/opt/orto-digitale/nodered/data/` (NON `/opt/orto-digitale/rpi5/nodered/...` come suggerito da una skill)
+- Ri-iniezione credenziali Node-RED ad ogni redeploy `flows.json` (procedura §5.5)
+- SSH Ethernet `192.168.1.12` non rispondeva, fallback su WiFi `192.168.1.46`
+
+**Deviazioni dalla spec:** nessuna funzionale. Solo il `valve.command_timeout_seconds` (state machine retry) non è ancora attivo nella logica di apertura — la decisione publica subito su MQTT senza attendere conferma. Il safety timer + monitoring loop coprono comunque il caso di valvola non rispondente. Da implementare in step 4+ se necessario dopo le prime 2 settimane di dry_run.
+
+**Prossimo passo:** osservazione 1–2 settimane in `mode=dry_run`, poi switch manuale a `mode=auto` via:
+```bash
+curl -X POST -H "Content-Type: application/json" -d '{"value": "auto"}' http://192.168.1.12:1880/api/config/mode
+```
+
