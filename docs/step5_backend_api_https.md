@@ -323,6 +323,33 @@ Aggiungere a `hosts`:
 - **Linux/macOS:** `/etc/hosts` → idem
 - **Android:** non modificabile senza root → usare IP `https://192.168.1.12` direttamente, oppure DNS locale (fuori scope).
 
+### 9.5 Avahi mDNS alias (`orto.local` self-pubblicato)
+
+> Aggiunto **2026-05-16** (branch `step/6b-avahi-mdns`). Risolve il problema "smartphone non può editare hosts" senza dover toccare il router. È la via canonica per il TLD `.local` (RFC 6762).
+
+Il RPi pubblica `orto.local` via mDNS multicast (porta UDP 5353) come record A puntato all'IP primario (eth0, fallback wlan0). iOS / Safari / Chrome Android moderni risolvono nativamente i nomi `.local` via mDNS, niente entry hosts né DNS router.
+
+**Componenti:**
+- `/opt/orto-digitale/scripts/avahi-publish-orto.sh` (eseguibile, owner `as`)
+- `/etc/systemd/system/orto-local-mdns.service` (enabled)
+- Dipende da `avahi-daemon` (preesistente) e `avahi-utils` (installato in questa sessione)
+
+**Verifica:**
+```bash
+ssh as@192.168.1.12 'systemctl status orto-local-mdns.service'
+ssh as@192.168.1.12 'avahi-resolve -n orto.local'   # -> orto.local 192.168.1.12
+
+# Dal PC (rimuovi temporaneamente la riga 'orto.local' da hosts):
+ping orto.local        # Windows 10/11: risolve via mDNS nativo
+# Dal telefono sulla stessa WiFi:
+# Apri https://orto.local in Chrome/Safari → SPA con cert valido (se CA Caddy installata)
+```
+
+**Caveat:**
+- L'IP pubblicato è statico (rilevato all'avvio del service). Se Ethernet cade in corsa, l'alias resta su `.12` (irraggiungibile) finché non riavvii il service: `sudo systemctl restart orto-local-mdns.service`.
+- Su reti WiFi con multicast filtering / strict AP isolation, mDNS può essere bloccato — testato OK su TIM Hub.
+- `avahi-publish-cname` non esiste in Debian 13 trixie (deprecato); usa solo `avahi-publish-address`.
+
 ---
 
 ## 10. Aggiornamento `verify_rpi5.sh`

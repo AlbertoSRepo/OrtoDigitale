@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # verify_rpi5.sh — Healthcheck completo stack Orto Digitale su Raspberry Pi 5.
-# Esegue 11 controlli e stampa un report colorato. Exit code != 0 se almeno un check fallisce.
+# Esegue 12 controlli e stampa un report colorato. Exit code != 0 se almeno un check fallisce.
 #
 # Uso:
 #   bash /opt/orto-digitale/scripts/verify_rpi5.sh
@@ -293,7 +293,26 @@ for ep in /api/sensors/last /api/valve/state /api/weather/now; do
 done
 
 # ---------------------------------------------------------------------------
-# [11] Simulatore (informativo)
+# [11] Avahi mDNS alias orto.local
+# ---------------------------------------------------------------------------
+section "Avahi mDNS alias orto.local"
+
+if systemctl is-active --quiet orto-local-mdns.service; then
+  check_ok "orto-local-mdns.service attivo"
+  if command -v avahi-resolve >/dev/null 2>&1; then
+    MDNS_IP=$(avahi-resolve -n orto.local 2>/dev/null | awk '{print $2}')
+    if [ -n "$MDNS_IP" ]; then
+      check_ok "avahi-resolve orto.local -> $MDNS_IP"
+    else
+      check_warn "avahi-resolve non risolve orto.local (mDNS rete bloccata?)"
+    fi
+  fi
+else
+  check_warn "orto-local-mdns.service non attivo (alias mDNS disabilitato)"
+fi
+
+# ---------------------------------------------------------------------------
+# [12] Simulatore (informativo)
 # ---------------------------------------------------------------------------
 section "Simulatore sensori (informativo)"
 
