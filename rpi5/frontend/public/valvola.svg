@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 320" fill="none">
+  
+  <defs>
+    <linearGradient id="vbody" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a2924"></stop>
+      <stop offset="0.5" stop-color="#1a1915"></stop>
+      <stop offset="1" stop-color="#0d0c0a"></stop>
+    </linearGradient>
+    <linearGradient id="vside" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#000" stop-opacity="0.5"></stop>
+      <stop offset="0.3" stop-color="#000" stop-opacity="0"></stop>
+      <stop offset="0.7" stop-color="#000" stop-opacity="0"></stop>
+      <stop offset="1" stop-color="#000" stop-opacity="0.45"></stop>
+    </linearGradient>
+    <linearGradient id="vbrass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#a8884a"></stop>
+      <stop offset="0.5" stop-color="#7a6332"></stop>
+      <stop offset="1" stop-color="#594722"></stop>
+    </linearGradient>
+    <radialGradient id="vledOn" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#9bd9ff"></stop>
+      <stop offset="0.4" stop-color="#4690b3"></stop>
+      <stop offset="1" stop-color="#1a3d4f"></stop>
+    </radialGradient>
+    <radialGradient id="vledOff" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#3a3a36"></stop>
+      <stop offset="1" stop-color="#15140f"></stop>
+    </radialGradient>
+  </defs>
+
+  
+  <rect x="40" y="30" width="120" height="180" rx="14" fill="url(#vbody)"></rect>
+  <rect x="40" y="30" width="120" height="180" rx="14" fill="url(#vside)"></rect>
+  
+  <rect x="44" y="30" width="112" height="6" rx="3" fill="#000" opacity="0.45"></rect>
+  
+  <rect x="42" y="48" width="3" height="140" fill="#000" opacity="0.4"></rect>
+  <rect x="155" y="48" width="3" height="140" fill="#000" opacity="0.4"></rect>
+
+  
+  <rect x="62" y="80" width="76" height="14" rx="2" fill="#000" opacity="0.55"></rect>
+  <text x="100" y="91" text-anchor="middle" font-family="ui-monospace,monospace" font-size="9" font-weight="700" fill="#9aa0a6" letter-spacing="2">SONOFF</text>
+
+  
+  <circle id="valve-led" cx="100" cy="115" r="6" fill="url(#vledOff)"></circle>
+  <circle cx="100" cy="115" r="6" fill="none" stroke="#000" stroke-width="0.5" opacity="0.5"></circle>
+
+  
+  <circle cx="100" cy="155" r="14" fill="#0d0c0a" stroke="#000" stroke-width="1"></circle>
+  <circle cx="100" cy="155" r="11" fill="#1a1915"></circle>
+  <circle cx="100" cy="151" r="2" fill="#fff" opacity="0.08"></circle>
+
+  
+  <rect x="48" y="200" width="104" height="10" rx="3" fill="#000" opacity="0.55"></rect>
+
+  
+  <rect x="78" y="210" width="44" height="14" fill="url(#vbrass)"></rect>
+  <rect x="78" y="210" width="44" height="2" fill="#000" opacity="0.5"></rect>
+  <rect x="78" y="222" width="44" height="2" fill="#000" opacity="0.4"></rect>
+
+  
+  <rect x="84" y="224" width="32" height="40" fill="url(#vbrass)"></rect>
+  <line x1="84" y1="230" x2="116" y2="230" stroke="#000" stroke-width="0.5" opacity="0.6"></line>
+  <line x1="84" y1="236" x2="116" y2="236" stroke="#000" stroke-width="0.5" opacity="0.6"></line>
+  <line x1="84" y1="242" x2="116" y2="242" stroke="#000" stroke-width="0.5" opacity="0.6"></line>
+  <line x1="84" y1="248" x2="116" y2="248" stroke="#000" stroke-width="0.5" opacity="0.6"></line>
+  <line x1="84" y1="254" x2="116" y2="254" stroke="#000" stroke-width="0.5" opacity="0.6"></line>
+  <line x1="84" y1="260" x2="116" y2="260" stroke="#000" stroke-width="0.5" opacity="0.6"></line>
+  
+  <ellipse cx="100" cy="266" rx="16" ry="4" fill="#3d3220"></ellipse>
+  <ellipse cx="100" cy="265" rx="13" ry="2.5" fill="#1a140a"></ellipse>
+</svg>
