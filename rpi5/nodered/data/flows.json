@@ -247,7 +247,7 @@
         "type": "function",
         "z": "f-valve",
         "name": "validate + build MQTT cmd",
-        "func": "// Valida :action e costruisce payload MQTT.\n// Marca origine in global.last_cmd_source per il tracking irrigation_events.\nconst raw = ((msg.req && msg.req.params && msg.req.params.action) || '').toLowerCase();\nconst MAP = { on: 'ON', off: 'OFF', toggle: 'TOGGLE' };\nconst mqttState = MAP[raw];\n\nmsg.headers = {\n    'Access-Control-Allow-Origin': '*',\n    'Access-Control-Allow-Methods': 'POST, OPTIONS',\n    'Access-Control-Allow-Headers': 'Content-Type'\n};\n\nif (!mqttState) {\n    msg.statusCode = 400;\n    msg.payload = { ok: false, error: `invalid action '${raw}', use on/off/toggle` };\n    node.status({ fill: 'red', shape: 'ring', text: `400 '${raw}'` });\n    return [null, msg];\n}\n\nconst mqttMsg = {\n    topic: 'zigbee2mqtt/SWV_valvola/set',\n    payload: { state: mqttState }\n};\n\n// Comando manuale: globalizza il source per il tracking dell'evento.\nif (mqttState === 'ON') global.set('last_cmd_source', 'manual');\n\nmsg.statusCode = 200;\nmsg.payload = { ok: true, action: raw, sent: mqttState };\nnode.status({ fill: 'blue', shape: 'dot', text: `${raw} @ ${new Date().toISOString().substr(11, 8)}` });\n\nreturn [mqttMsg, msg];\n",
+        "func": "// Valida :action e costruisce payload MQTT.\n// Marca origine in global.last_cmd_source per il tracking irrigation_events.\n// Step 5: supporta duration_seconds nel body per apertura manuale temporizzata.\nconst raw = ((msg.req && msg.req.params && msg.req.params.action) || '').toLowerCase();\nconst MAP = { on: 'ON', off: 'OFF', toggle: 'TOGGLE' };\nconst mqttState = MAP[raw];\n\nmsg.headers = {\n    'Access-Control-Allow-Origin': '*',\n    'Access-Control-Allow-Methods': 'POST, OPTIONS',\n    'Access-Control-Allow-Headers': 'Content-Type'\n};\n\nif (!mqttState) {\n    msg.statusCode = 400;\n    msg.payload = { ok: false, error: `invalid action '${raw}', use on/off/toggle` };\n    node.status({ fill: 'red', shape: 'ring', text: `400 '${raw}'` });\n    return [null, msg];\n}\n\n// Step 5: parsing duration_seconds dal body (solo per ON).\nlet durationApplied = null;\nif (mqttState === 'ON') {\n    const cfg = global.get('irrigation_config') || {};\n    const safety = (cfg.irrigation && cfg.irrigation.safety_timeout_seconds) || 900;\n    const body = msg.req && msg.req.body;\n    let d = body && body.duration_seconds;\n    if (d !== undefined && d !== null) {\n        d = Number(d);\n        if (!Number.isFinite(d) || d < 60) {\n            msg.statusCode = 400;\n            msg.payload = { ok: false, error: 'duration_seconds must be a number >= 60' };\n            node.status({ fill: 'red', shape: 'ring', text: '400 dur' });\n            return [null, msg];\n        }\n        durationApplied = Math.min(d, safety);\n    }\n    global.set('valve_runtime', { requested_duration: durationApplied, requested_at: Date.now() });\n}\n\nconst mqttMsg = {\n    topic: 'zigbee2mqtt/SWV_valvola/set',\n    payload: { state: mqttState }\n};\n\n// Comando manuale: globalizza il source per il tracking dell'evento.\nif (mqttState === 'ON') global.set('last_cmd_source', 'manual');\n\nmsg.statusCode = 200;\nmsg.payload = { ok: true, action: raw, sent: mqttState };\nif (durationApplied !== null) msg.payload.duration_seconds_applied = durationApplied;\nnode.status({ fill: 'blue', shape: 'dot', text: `${raw} @ ${new Date().toISOString().substr(11, 8)}` });\n\nreturn [mqttMsg, msg];\n",
         "outputs": 2,
         "timeout": "",
         "noerr": 0,
@@ -324,7 +324,7 @@
         "type": "function",
         "z": "f-valve",
         "name": "update global.valve_state_runtime",
-        "func": "// Mantiene global.valve_state_runtime per la decision loop.\n// Cancella anche awaiting_confirmation se la conferma attesa è arrivata.\nconst p = msg.payload;\nif (!p || typeof p !== 'object') return null;\n\nif (p.state === 'ON' || p.state === 'OFF') {\n    global.set('valve_state_runtime', p.state);\n    const awaiting = global.get('awaiting_confirmation');\n    if (awaiting && awaiting.target === p.state) {\n        global.set('awaiting_confirmation', null);\n        global.set('valve_unreachable_consecutive', 0);\n    }\n}\n\n// Cattura reachable per gating apertura.\nif (typeof p.reachable === 'boolean') {\n    global.set('valve_reachable', p.reachable);\n}\n\nreturn null;\n",
+        "func": "// Mantiene global.valve_state_runtime per la decision loop.\n// Cancella anche awaiting_confirmation se la conferma attesa e' arrivata.\n// Step 5: traccia last_change (transizione) e linkquality per /api/valve/state.\nconst p = msg.payload;\nif (!p || typeof p !== 'object') return null;\n\nif (p.state === 'ON' || p.state === 'OFF') {\n    const prev = global.get('valve_state_runtime');\n    if (prev !== p.state) {\n        global.set('valve_last_change', Date.now());\n    }\n    global.set('valve_state_runtime', p.state);\n    const awaiting = global.get('awaiting_confirmation');\n    if (awaiting && awaiting.target === p.state) {\n        global.set('awaiting_confirmation', null);\n        global.set('valve_unreachable_consecutive', 0);\n    }\n}\n\n// Cattura reachable per gating apertura.\nif (typeof p.reachable === 'boolean') {\n    global.set('valve_reachable', p.reachable);\n}\n\n// Step 5: linkquality (qualita' Zigbee) per /api/valve/state.\nif (Number.isFinite(p.linkquality)) {\n    global.set('valve_linkquality', Number(p.linkquality));\n}\n\nreturn null;\n",
         "outputs": 1,
         "timeout": "",
         "noerr": 0,
@@ -380,7 +380,7 @@
         "type": "function",
         "z": "f-valve",
         "name": "safety timer auto-OFF (config-driven)",
-        "func": "// Safety: forza OFF dopo irrigation.safety_timeout_seconds (default 900).\nconst cfg = global.get('irrigation_config') || {};\nconst SAFETY_S = (cfg.irrigation && cfg.irrigation.safety_timeout_seconds) || 900;\nconst state = msg.payload && msg.payload.state;\n\nlet h = context.get('timer');\nif (h) { clearTimeout(h); context.set('timer', null); }\n\nif (state === 'ON') {\n    const ms = SAFETY_S * 1000;\n    const fires_at = new Date(Date.now() + ms);\n    const handle = setTimeout(() => {\n        node.warn(`SAFETY TIMEOUT ${SAFETY_S}s: forcing OFF`);\n        node.send({\n            topic: 'zigbee2mqtt/SWV_valvola/set',\n            payload: { state: 'OFF' },\n            _safety: true\n        });\n        context.set('timer', null);\n        node.status({ fill: 'red', shape: 'dot', text: `TIMEOUT @ ${new Date().toISOString().substr(11, 8)}` });\n    }, ms);\n    context.set('timer', handle);\n    node.status({ fill: 'yellow', shape: 'dot', text: `armed ${SAFETY_S}s (OFF @ ${fires_at.toISOString().substr(11, 5)})` });\n} else if (state === 'OFF') {\n    node.status({ fill: 'green', shape: 'dot', text: 'disarmed (OFF)' });\n}\n\nreturn null;\n",
+        "func": "// Safety/auto-off timer: forza OFF dopo durata richiesta (default safety_timeout_seconds).\n// Step 5: se global.valve_runtime.requested_duration e' settato, usa quello (clamp a SAFETY_S).\nconst cfg = global.get('irrigation_config') || {};\nconst SAFETY_S = (cfg.irrigation && cfg.irrigation.safety_timeout_seconds) || 900;\nconst state = msg.payload && msg.payload.state;\n\nlet h = context.get('timer');\nif (h) { clearTimeout(h); context.set('timer', null); }\n\nif (state === 'ON') {\n    const runtime = global.get('valve_runtime') || {};\n    const req = Number(runtime.requested_duration);\n    const DURATION_S = (Number.isFinite(req) && req >= 60) ? Math.min(req, SAFETY_S) : SAFETY_S;\n    const ms = DURATION_S * 1000;\n    const fires_at = new Date(Date.now() + ms);\n    // Salva opened_at per /api/valve/state (open_since_seconds, auto_close_in_seconds).\n    global.set('valve_runtime', Object.assign({}, runtime, { opened_at: Date.now(), duration_seconds: DURATION_S }));\n    const label = DURATION_S < SAFETY_S ? `manual ${DURATION_S}s` : `safety ${DURATION_S}s`;\n    const handle = setTimeout(() => {\n        node.warn(`AUTO-OFF ${DURATION_S}s: forcing OFF`);\n        node.send({\n            topic: 'zigbee2mqtt/SWV_valvola/set',\n            payload: { state: 'OFF' },\n            _safety: true\n        });\n        context.set('timer', null);\n        node.status({ fill: 'red', shape: 'dot', text: `TIMEOUT @ ${new Date().toISOString().substr(11, 8)}` });\n    }, ms);\n    context.set('timer', handle);\n    node.status({ fill: 'yellow', shape: 'dot', text: `armed ${label} (OFF @ ${fires_at.toISOString().substr(11, 5)})` });\n} else if (state === 'OFF') {\n    // Pulisci runtime di apertura.\n    const runtime = global.get('valve_runtime') || {};\n    if (runtime && runtime.opened_at) {\n        global.set('valve_runtime', { requested_duration: null, opened_at: null, duration_seconds: null, last_close_at: Date.now() });\n    }\n    node.status({ fill: 'green', shape: 'dot', text: 'disarmed (OFF)' });\n}\n\nreturn null;\n",
         "outputs": 1,
         "timeout": "",
         "noerr": 0,
@@ -448,6 +448,54 @@
         "bucket": "garden",
         "x": 820,
         "y": 420,
+        "wires": []
+    },
+    {
+        "id": "n-http-valve-state",
+        "type": "http in",
+        "z": "f-valve",
+        "name": "GET /api/valve/state",
+        "url": "/api/valve/state",
+        "method": "get",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 180,
+        "y": 580,
+        "wires": [
+            [
+                "n-fn-valve-state-build"
+            ]
+        ]
+    },
+    {
+        "id": "n-fn-valve-state-build",
+        "type": "function",
+        "z": "f-valve",
+        "name": "build valve state response",
+        "func": "// Step 5: assembla risposta GET /api/valve/state.\nconst now = Date.now();\nconst state = global.get('valve_state_runtime');\nconst reachable = global.get('valve_reachable');\nconst linkquality = global.get('valve_linkquality');\nconst last_change = global.get('valve_last_change');\nconst runtime = global.get('valve_runtime') || {};\nconst cfg = global.get('irrigation_config') || {};\nconst max_duration = (cfg.irrigation && cfg.irrigation.safety_timeout_seconds) || 900;\n\nlet open_since_seconds = null;\nlet auto_close_in_seconds = null;\nif (state === 'ON' && runtime.opened_at) {\n    open_since_seconds = Math.round((now - runtime.opened_at) / 1000);\n    const dur = runtime.duration_seconds || max_duration;\n    auto_close_in_seconds = Math.max(0, dur - open_since_seconds);\n}\n\nmsg.statusCode = 200;\nmsg.headers = { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' };\nmsg.payload = {\n    valve_id: 'SWV_01',\n    state: state || 'unknown',\n    reachable: typeof reachable === 'boolean' ? reachable : null,\n    linkquality: Number.isFinite(linkquality) ? linkquality : null,\n    last_change: last_change || null,\n    open_since_seconds,\n    auto_close_in_seconds,\n    max_duration_seconds: max_duration,\n    requested_duration_seconds: runtime.duration_seconds || null\n};\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 480,
+        "y": 580,
+        "wires": [
+            [
+                "n-http-resp-valve-state"
+            ]
+        ]
+    },
+    {
+        "id": "n-http-resp-valve-state",
+        "type": "http response",
+        "z": "f-valve",
+        "name": "resp 200 JSON",
+        "statusCode": "",
+        "headers": {},
+        "x": 780,
+        "y": 580,
         "wires": []
     },
     {
