@@ -91,6 +91,23 @@ services:
     networks:
       - iot-net
 
+  caddy:
+    image: caddy:latest
+    container_name: caddy
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy/data:/data
+      - ./caddy/config:/config
+      - ./frontend/dist:/srv:ro
+    depends_on:
+      - nodered
+    networks:
+      - iot-net
+
 networks:
   iot-net:
     driver: bridge

@@ -149,10 +149,12 @@ Il GW3000 pubblica **tutti i sensori** in un unico topic `ecowitt/gw3000` come s
 | 1 | Docker Compose: Mosquitto + InfluxDB + Grafana | ✅ |
 | 1b | Dashboard Grafana + simulatore sintetico | ✅ (simulatore disabilitato) |
 | 2 | GW3000 → MQTT → Node-RED → InfluxDB | ✅ (4/6 sensori) |
-| 3 | SONOFF SWV + Zigbee2MQTT | ⏳ Prossimo |
-| 4 | Logica irrigazione automatica | ⏳ |
-| 5 | Dashboard Grafana definitiva | ⏳ |
-| 6 | Archiviazione CSV su USB | ⏳ |
+| 3 | SONOFF SWV + Zigbee2MQTT | ✅ |
+| 4 | Logica irrigazione automatica | ✅ |
+| 5 | Frontend PWA — backend API + Caddy HTTPS | ✅ |
+| 6 | Frontend PWA — SPA Vite/React/Recharts | ⏳ Prossimo |
+| 7 | Frontend PWA — installable + offline (Workbox) | ⏳ |
+| 8 | Archiviazione CSV su USB | ⏳ |
 
 ---
 

@@ -1,0 +1,15 @@
+[Unit]
+Description=Orto Digitale shutdown watcher (monitor flag file scritto da Node-RED)
+After=docker.service network.target
+
+[Service]
+Type=simple
+User=as
+ExecStart=/opt/orto-digitale/scripts/shutdown_watcher.sh
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -392,3 +392,52 @@ Tutti gli 11 check devono essere verdi.
 - HTTPS con CA pubblica (Let's Encrypt) — richiederebbe dominio esterno, fuori filosofia "tutto locale".
 - Endpoint write per `irrigation_config` da FE — la modifica della config resta via MQTT come da step 4. Step 6 si limita alla lettura via `/api/config` (già esistente).
 - DNS locale automatico per `orto.local` su Android (richiede pi-hole o simili).
+
+---
+## Implementazione
+**Stato:** ✅ COMPLETATO — 2026-05-15
+**Branch:** `step/5-backend-api-https` (8 commit)
+**Healthcheck:** 11/11 verde (`bash /opt/orto-digitale/scripts/verify_rpi5.sh`)
+
+### Cosa è stato fatto
+
+- Container Caddy con `tls internal` + reverse proxy `/api/* → nodered:1880`, cert per `orto.local`, `192.168.1.12`, `192.168.1.46`.
+- Root CA estratta (`caddy_root.crt`) e installata su PC; pronta per Android (step 7).
+- 6 nuovi endpoint GET in tab `f-api-readers` (sensors/last, sensors/trend, valve/intervals, valve/cumulative, weather/now, weather/forecast) — tutti testati end-to-end via curl HTTPS.
+- Tab `f-system` con `GET /api/system/health`, `POST /api/system/shutdown`, `POST /api/system/shutdown/cancel`.
+- Estensione `f-valve`: `POST /api/valve/on` accetta `{ duration_seconds }` con clamp [60, safety_timeout]; `GET /api/valve/state` esposto.
+- Sudoers `as ALL=(root) NOPASSWD: /sbin/shutdown -h +5, /sbin/shutdown -c` installato in `/etc/sudoers.d/nodered-shutdown`.
+- `verify_rpi5.sh` esteso a 11 check (Caddy HTTPS + 4 endpoint API + nodered + caddy + porte 1880/443).
+- UFW: aperte porte 80/tcp e 443/tcp.
+
+### Deviazioni dalla spec
+
+1. **Shutdown via file-flag + systemd watcher sull'host (non `exec` diretto da Node-RED).** Il container `nodered` (Alpine) non ha `sudo` né `/sbin/shutdown`, ed essendo in PID namespace isolato non può comunque spegnere l'host. Soluzione: il flow scrive un flag in `/data/system/shutdown_requested.flag`; un servizio `orto-shutdown-watcher.service` gira sull'host come utente `as`, monitora il file, e invoca `sudo /sbin/shutdown -h +5`.
+2. **Countdown shutdown alzato da +1 a +5 minuti.** Il countdown +1 originale attivava `pam_nologin(8)` immediatamente, bloccando *qualsiasi* nuovo login SSH (anche sudoer) e rendendo impossibile il cancel da remoto. Confermato sul campo: durante il primo test end-to-end il RPi si è spento davvero e ha richiesto riavvio fisico.
+3. **Aggiunto `POST /api/system/shutdown/cancel`** (non in spec originale). Scrive un secondo flag che il watcher rileva durante il countdown e esegue `sudo /sbin/shutdown -c`. Permette di annullare via UI/curl senza aprire SSH (impossibile durante il countdown per `pam_nologin`).
+4. **`/api/system/health` non espone `nodered_version`** (era in spec): `process.env` non è disponibile nei function node Node-RED (sandbox vm). L'uptime è calcolato da un timestamp salvato in `global.nodered_startup_at` al primo invocation.
+5. **`verify_rpi5.sh` usa `--resolve orto.local:443:127.0.0.1`** invece di `https://localhost` (Caddy `tls internal` non emette cert per `localhost`).
+
+### Nuovi artefatti persistenti sul RPi
+
+- `/opt/orto-digitale/caddy/{Caddyfile, data, config}`
+- `/opt/orto-digitale/caddy_root.crt` (estratto da Caddy CA, da installare su client)
+- `/opt/orto-digitale/scripts/shutdown_watcher.sh`
+- `/etc/systemd/system/orto-shutdown-watcher.service` (enabled, running)
+- `/etc/sudoers.d/nodered-shutdown` (0440)
+
+### Endpoint verificati
+
+| Endpoint | Verbo | Risposta verificata |
+|---|---|---|
+| `/api/system/health` | GET | `{ uptime_seconds, mode, valve_state, sensors_online, ... }` |
+| `/api/system/shutdown` | POST | `{ ok, scheduled_in_seconds: 300, countdown_minutes: 5 }` — end-to-end OK con cancel |
+| `/api/system/shutdown/cancel` | POST | watcher esegue `sudo shutdown -c` entro <10s |
+| `/api/sensors/last` | GET | 6 sensori (4 con dati reali) |
+| `/api/sensors/trend` | GET | serie ~288 punti su 24h (WH51_01) |
+| `/api/valve/state` | GET | stato + open_since/auto_close calcolati |
+| `/api/valve/intervals` | GET | 13 intervalli storici su -30g (auto/manual distinti) |
+| `/api/valve/cumulative` | GET | `total_open_seconds: 11762` su -30g |
+| `/api/weather/now` | GET | temp + humidity + precip da cache InfluxDB |
+| `/api/weather/forecast` | GET | 7 giorni daily live da Open-Meteo |
+| `/api/valve/on` body `{duration_seconds}` | POST | non testato end-to-end (evitata apertura fisica fuori finestra); code review verde |
