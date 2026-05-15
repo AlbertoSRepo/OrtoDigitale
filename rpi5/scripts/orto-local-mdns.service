@@ -1,0 +1,14 @@
+[Unit]
+Description=Publish orto.local via Avahi mDNS
+After=avahi-daemon.service network-online.target
+Requires=avahi-daemon.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/opt/orto-digitale/scripts/avahi-publish-orto.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
