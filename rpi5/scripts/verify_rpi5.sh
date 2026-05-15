@@ -270,16 +270,21 @@ fi
 # ---------------------------------------------------------------------------
 section "Caddy HTTPS + API endpoints"
 
-# Caddy HTTPS raggiungibile (self-signed CA, usiamo -k)
-if curl -sfk --max-time 5 https://localhost/api/system/health >/dev/null 2>&1; then
-  check_ok "https://localhost/api/system/health raggiungibile"
+# Caddy HTTPS raggiungibile via SNI corretto. Caddy con `tls internal` ha
+# cert solo per gli host elencati nel Caddyfile (orto.local, 192.168.1.x),
+# non per `localhost`: serve --resolve per forzare orto.local sul loopback.
+CADDY_BASE="https://orto.local"
+CADDY_RESOLVE="orto.local:443:127.0.0.1"
+
+if curl -sfk --max-time 5 --resolve "$CADDY_RESOLVE" "${CADDY_BASE}/api/system/health" >/dev/null 2>&1; then
+  check_ok "${CADDY_BASE}/api/system/health raggiungibile"
 else
   check_warn "Caddy HTTPS o /api/system/health non risponde (endpoint forse non ancora deployato)"
 fi
 
-# Verifica endpoint API principali via Caddy proxy (informativo, può fallire prima del deploy flows)
+# Verifica endpoint API principali via Caddy proxy.
 for ep in /api/sensors/last /api/valve/state /api/weather/now; do
-  RESP=$(curl -sfk --max-time 5 "https://localhost${ep}" 2>/dev/null || echo "")
+  RESP=$(curl -sfk --max-time 5 --resolve "$CADDY_RESOLVE" "${CADDY_BASE}${ep}" 2>/dev/null || echo "")
   if [ -n "$RESP" ]; then
     check_ok "Endpoint ${ep} risponde"
   else
