@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # verify_rpi5.sh — Healthcheck completo stack Orto Digitale su Raspberry Pi 5.
-# Esegue 10 controlli e stampa un report colorato. Exit code != 0 se almeno un check fallisce.
+# Esegue 11 controlli e stampa un report colorato. Exit code != 0 se almeno un check fallisce.
 #
 # Uso:
 #   bash /opt/orto-digitale/scripts/verify_rpi5.sh
@@ -137,7 +137,7 @@ done
 section "Container running"
 
 if [ -f "$COMPOSE_FILE" ]; then
-  for svc in mosquitto influxdb grafana; do
+  for svc in mosquitto influxdb grafana nodered caddy; do
     STATE=$(docker inspect -f '{{.State.Status}}' "$svc" 2>/dev/null || echo "missing")
     RESTARTS=$(docker inspect -f '{{.RestartCount}}' "$svc" 2>/dev/null || echo "?")
     case "$STATE" in
@@ -171,7 +171,7 @@ else
   LISTEN=$(netstat -tlnH 2>/dev/null || true)
 fi
 
-for port in 1883 8086 3000; do
+for port in 1883 8086 3000 1880 443; do
   if echo "$LISTEN" | grep -qE "[:.]${port}\b"; then
     check_ok "Porta $port in LISTEN"
   else
@@ -266,7 +266,29 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# [10] Simulatore (informativo)
+# [10] Caddy HTTPS + API endpoints
+# ---------------------------------------------------------------------------
+section "Caddy HTTPS + API endpoints"
+
+# Caddy HTTPS raggiungibile (self-signed CA, usiamo -k)
+if curl -sfk --max-time 5 https://localhost/api/system/health >/dev/null 2>&1; then
+  check_ok "https://localhost/api/system/health raggiungibile"
+else
+  check_warn "Caddy HTTPS o /api/system/health non risponde (endpoint forse non ancora deployato)"
+fi
+
+# Verifica endpoint API principali via Caddy proxy (informativo, può fallire prima del deploy flows)
+for ep in /api/sensors/last /api/valve/state /api/weather/now; do
+  RESP=$(curl -sfk --max-time 5 "https://localhost${ep}" 2>/dev/null || echo "")
+  if [ -n "$RESP" ]; then
+    check_ok "Endpoint ${ep} risponde"
+  else
+    check_warn "Endpoint ${ep} non risponde (flow Node-RED non ancora deployato?)"
+  fi
+done
+
+# ---------------------------------------------------------------------------
+# [11] Simulatore (informativo)
 # ---------------------------------------------------------------------------
 section "Simulatore sensori (informativo)"
 
