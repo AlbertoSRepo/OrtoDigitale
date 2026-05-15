@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 56" fill="none">
+  <defs>
+    <linearGradient id="dropG" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9bc8d9"></stop>
+      <stop offset="0.5" stop-color="#4690b3"></stop>
+      <stop offset="1" stop-color="#2e6e8e"></stop>
+    </linearGradient>
+    <radialGradient id="dropHi" cx="0.35" cy="0.35" r="0.35">
+      <stop offset="0" stop-color="#fff" stop-opacity="0.85"></stop>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"></stop>
+    </radialGradient>
+  </defs>
+  <path d="M20 2 C 20 2, 4 24, 4 38 C 4 47.94, 11.16 54, 20 54 C 28.84 54, 36 47.94, 36 38 C 36 24, 20 2, 20 2 Z" fill="url(#dropG)" stroke="#1d4f68" stroke-width="0.5"></path>
+  <ellipse cx="14" cy="34" rx="6" ry="9" fill="url(#dropHi)"></ellipse>
+</svg>

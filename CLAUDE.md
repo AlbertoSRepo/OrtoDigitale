@@ -152,8 +152,8 @@ Il GW3000 pubblica **tutti i sensori** in un unico topic `ecowitt/gw3000` come s
 | 3 | SONOFF SWV + Zigbee2MQTT | ✅ |
 | 4 | Logica irrigazione automatica | ✅ |
 | 5 | Frontend PWA — backend API + Caddy HTTPS | ✅ |
-| 6 | Frontend PWA — SPA Vite/React/Recharts | ⏳ Prossimo |
-| 7 | Frontend PWA — installable + offline (Workbox) | ⏳ |
+| 6 | Frontend PWA — SPA Vite/React/Recharts | ✅ |
+| 7 | Frontend PWA — installable + offline (Workbox) | ⏳ Prossimo |
 | 8 | Archiviazione CSV su USB | ⏳ |
 
 ---

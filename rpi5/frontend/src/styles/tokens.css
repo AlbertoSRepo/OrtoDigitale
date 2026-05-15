@@ -1,0 +1,61 @@
+/* Orto Digitale — design tokens (porting da prototipo) */
+
+:root,
+:root[data-theme="light"] {
+  --paper: #f4efe6;
+  --paper-2: #ebe4d6;
+  --ink: #000000;
+  --ink-2: #000000;
+  --ink-3: #000000;
+  --ink-4: #2a2a2a;
+  --rule: #5d8348;
+  --rule-2: rgba(93, 131, 72, 0.45);
+  --card: transparent;
+  --card-2: transparent;
+
+  --moss: #4a6b3a;
+  --moss-2: #5d8348;
+  --leaf: #8aab5e;
+  --terra: #b6552c;
+  --terra-2: #d97443;
+  --clay: #e0a263;
+  --water: #2e6e8e;
+  --water-2: #4690b3;
+  --sky: #9bc8d9;
+
+  --hm-dry: #c2492a;
+  --hm-mid: #8aab5e;
+  --hm-wet: #4690b3;
+
+  --serif: "DM Serif Display", "Cormorant Garamond", Georgia, serif;
+  --sans: "Be Vietnam Pro", "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --ease: cubic-bezier(0.4, 0.1, 0.2, 1);
+}
+
+[data-theme="dark"] {
+  --paper: #14130f;
+  --paper-2: #1c1a14;
+  --ink: #f0eadb;
+  --ink-2: #c8c0ad;
+  --ink-3: #908774;
+  --ink-4: #5e5746;
+  --rule: rgba(240, 234, 219, 0.18);
+  --rule-2: rgba(240, 234, 219, 0.08);
+  --card: #1f1d17;
+  --card-2: #25221a;
+
+  --moss: #8fb56b;
+  --moss-2: #a6c980;
+  --leaf: #b4d086;
+  --terra: #e08856;
+  --terra-2: #f0a16e;
+  --clay: #e8b378;
+  --water: #6fa8c2;
+  --water-2: #8cc0d8;
+  --sky: #b8d8e4;
+
+  --hm-dry: #e08856;
+  --hm-mid: #a6c980;
+  --hm-wet: #8cc0d8;
+}

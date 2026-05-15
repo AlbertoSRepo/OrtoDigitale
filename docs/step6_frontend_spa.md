@@ -446,3 +446,60 @@ Da browser mobile (Android Chrome) su `https://orto.local`:
 - Banner offline
 - Install prompt "Aggiungi a schermata Home"
 - Lighthouse PWA audit
+
+---
+## Implementazione
+**Stato:** ✅ COMPLETATO — 2026-05-15
+**Branch:** `step/6-frontend-spa`
+**Healthcheck:** 11/11 verde (`bash /opt/orto-digitale/scripts/verify_rpi5.sh`)
+
+### Cosa è stato fatto
+
+- Scaffold `rpi5/frontend/` con Vite 5 + React 18 + TypeScript strict.
+- API client tipizzato (`src/api/`) con fetch wrapper + 4 moduli (sensors / valve / weather / system) e hooks React Query con polling differenziato (sensori 5s, valve state 2s per countdown live, health 10s, weather now 60s, weather forecast 30 min).
+- Tipi TS allineati 1:1 al payload reale di Node-RED (estratto da `rpi5/nodered/data/flows.json` per evitare deviazioni).
+- Store globale `zustand` con `theme` (persistito su localStorage), `activeTab`, `periodOrto`, `periodValve` indipendenti.
+- Design tokens earth-tone copiati dal prototipo `orto-digitale-design/project/styles.css`; CSS globale ~1500 righe portato as-is (light + dark + responsive 700/900/1100/1280px).
+- Componenti core: `TabNav`, `ThemeToggle`, `Topbar`, `DateRangePicker` (preset 24h/7d/30d + range custom con click-outside / ESC).
+- Pagina **Orto**: `Hero` (ortofoto + 6 pin SVG con halo/blob heatmap, tooltip su hover con metadati sensore + indicazione "non installato" per WH51_05/06), `HumidityChart` (Recharts LineChart con 6 serie colorate, comfort band 40–65 % via `ReferenceArea`, tooltip dark), `SensorList`, `WeatherCard` (temperatura corrente + 7 giorni con WMO weather-code → emoji).
+- Pagina **Waterflow**: `ValveCard` (stato grande, countdown `aperta da` / `spegnimento tra`, 4 bottoni durata 5/15/30/60 m + bottone chiudi con feedback toast inline, chip `reachable` + `linkquality`), `ValveStepChart` (SVG custom con segmenti `auto` / `manuale` / `chiuso`, tooltip al hover con start/fine/durata), `EventsList` (ultimi 5 intervalli), card cumulativo separata.
+- Pagina **Settings**: toggle tema, badge diagnostica (uptime, mode, valve, sensori online), bottone shutdown con `ShutdownModal` che richiede digitazione `SHUTDOWN` (case-sensitive) per abilitare la conferma; bottone "annulla shutdown" appare dopo richiesta riuscita e chiama `POST /api/system/shutdown/cancel`.
+- Build production: 176 KB gzip totali (CSS 6 KB + JS 176 KB) — sotto la stima di spec (270 KB).
+- Script `rpi5/scripts/deploy_frontend.sh`: build + rsync (fallback scp) + reload Caddy. Variabile `RPI_HOST` overridable per WiFi fallback (`as@192.168.1.46`).
+
+### Verifiche eseguite
+
+- `npm run build` → typecheck strict pulito.
+- Deploy su `/opt/orto-digitale/frontend/dist` (Caddy `:/srv:ro`).
+- Smoke test HTTPS via `curl --resolve orto.local:443:127.0.0.1`:
+  - `/` → 200, 873 B (`index.html`)
+  - `/assets/index-*.js` → 200, 609 KB
+  - `/assets/index-*.css` → 200, 28 KB
+  - `/ortophoto.jpg` → 200, 4 MB
+  - `/api/sensors/last` → 200, 6 sensori
+  - `/api/sensors/trend?start=-24h` → 200, 33 KB serie
+  - `/api/valve/state` → 200
+  - `/api/valve/intervals?start=-7d` → 200
+  - `/api/weather/now` → 200
+  - `/api/weather/forecast` → 200, 7 giorni
+  - `/api/system/health` → 200
+- Healthcheck 11/11 verde.
+- **Test browser visivo da PC** (umidità live, hover sensori, switch tab, theme toggle, date picker custom, controllo valvola): **da eseguire dall'utente** sull'URL `https://orto.local` (richiede CA Caddy installata sul PC, già fatto in step 5).
+
+### Deviazioni dalla spec
+
+1. **Niente cartelle separate per ogni componente** (`Heatmap/`, `HumidityChart/`, ecc.). I componenti vivono come singoli file `.tsx` in `src/components/`. Riduce boilerplate e import friction; ogni componente è ~150 righe e auto-contenuto.
+2. **`<Heatmap />` rinominato `<Hero />`** per coerenza col prototipo che usa lo stesso nome (l'ortofoto + heatmap è già il "hero" della pagina).
+3. **`Period` in zustand è discriminated union (`'24h' | '7d' | '30d' | { start, end }`) invece di stringa serializzata `custom:<a>:<b>`.** TypeScript-friendly, niente parse manuale.
+4. **`weather_code` → emoji mappato lato client** (non lato Node-RED come suggerito in §3.3), perché Node-RED già ritorna il codice WMO grezzo e la mappatura è UI-concern. Tabella standard WMO compatta (~15 ranges).
+5. **`ValveStepChart` è SVG custom (non Recharts step line).** Le serie a gradino di Recharts non rendono bene il pattern "intervallo discreto con colore variabile per `trigger`": la SVG custom (portata dal prototipo) gestisce direttamente segmenti `auto` / `manuale` / `chiuso` con tooltip integrato.
+6. **`<ConfirmModal>` è un overlay full-screen** (non un popover ancorato al bottone come nel prototipo): pattern più rigoroso per un'azione distruttiva (shutdown), focus trap implicito sul campo testo.
+7. **Bottone "annulla shutdown" mostrato dopo successo del POST** (non in spec): sfrutta l'endpoint `POST /api/system/shutdown/cancel` aggiunto in step 5 per cancellare il countdown senza SSH (impossibile a `pam_nologin` lockato).
+8. **Toast inline nel ValveCard invece che globale** per il feedback delle mutation (apri/chiudi). Meno layout overhead, vicino all'azione.
+9. **`HealthBadges` invece di lista verbosa**: aggrega uptime/mode/valve/sensori in 4 righe mono compatte allineate a destra. Nessun call separato a `nodered_version` (deviazione step 5 §4: `process.env` non disponibile in function node).
+
+### Nuovi artefatti
+
+- `rpi5/frontend/` — sorgenti SPA (~30 file, zero `node_modules` committate)
+- `rpi5/scripts/deploy_frontend.sh` — build + rsync + reload Caddy
+- `/opt/orto-digitale/frontend/dist/` sul RPi — bundle servito da Caddy come `/srv`
