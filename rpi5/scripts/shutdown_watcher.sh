@@ -12,23 +12,47 @@
 set -u
 
 FLAG="${ORTO_SHUTDOWN_FLAG:-/opt/orto-digitale/nodered/data/system/shutdown_requested.flag}"
-POLL_SECONDS="${ORTO_SHUTDOWN_POLL:-5}"
+CANCEL="${ORTO_SHUTDOWN_CANCEL:-/opt/orto-digitale/nodered/data/system/shutdown_cancel.flag}"
+COUNTDOWN_MINUTES="${ORTO_SHUTDOWN_COUNTDOWN:-5}"
+POLL_SECONDS="${ORTO_SHUTDOWN_POLL:-3}"
 
-echo "[orto-shutdown-watcher] monitoring $FLAG (poll ${POLL_SECONDS}s)"
+echo "[orto-shutdown-watcher] monitoring $FLAG (cancel: $CANCEL, countdown: +${COUNTDOWN_MINUTES}min, poll ${POLL_SECONDS}s)"
 
 while true; do
-    if [ -f "$FLAG" ]; then
+    # Cancel ha priorita': se entrambi i flag esistono, cancella e pulisci entrambi.
+    if [ -f "$CANCEL" ]; then
+        ts=$(date -Iseconds)
+        echo "[$ts] cancel flag detected"
+        rm -f "$CANCEL" "$FLAG"
+        logger -t orto-shutdown "shutdown cancel via API at $ts"
+        /usr/bin/sudo -n /sbin/shutdown -c 2>&1 | head -3 || {
+            echo "[$ts] sudo shutdown -c failed (nessun shutdown pendente?)"
+        }
+    elif [ -f "$FLAG" ]; then
         ts=$(date -Iseconds)
         content=$(cat "$FLAG" 2>/dev/null || echo "<read error>")
         echo "[$ts] flag detected: $content"
         rm -f "$FLAG"
-        logger -t orto-shutdown "shutdown requested via API at $ts: $content"
-        /usr/bin/sudo -n /sbin/shutdown -h +1 "Shutdown via Orto Digitale PWA" || {
+        logger -t orto-shutdown "shutdown requested via API at $ts: $content (countdown: +${COUNTDOWN_MINUTES}m)"
+        /usr/bin/sudo -n /sbin/shutdown -h "+${COUNTDOWN_MINUTES}" "Shutdown via Orto Digitale PWA" || {
             echo "[$ts] sudo shutdown FAILED (sudoers missing?)"
             logger -t orto-shutdown "sudo shutdown FAILED"
+            continue
         }
-        # Attende che lo shutdown effettivo avvenga (1 minuto).
-        sleep 70
+        # Loop di check per cancel anche durante il countdown. Esce solo quando il sistema va giu'.
+        # PAM nologin blocchera' nuove sessioni SSH, ma il watcher gira gia' come servizio quindi continua.
+        cancel_deadline=$(( $(date +%s) + COUNTDOWN_MINUTES * 60 + 10 ))
+        while [ $(date +%s) -lt $cancel_deadline ]; do
+            if [ -f "$CANCEL" ]; then
+                cts=$(date -Iseconds)
+                echo "[$cts] cancel during countdown"
+                rm -f "$CANCEL"
+                logger -t orto-shutdown "shutdown CANCELLED during countdown at $cts"
+                /usr/bin/sudo -n /sbin/shutdown -c 2>&1 | head -3
+                break
+            fi
+            sleep "$POLL_SECONDS"
+        done
     fi
     sleep "$POLL_SECONDS"
 done
