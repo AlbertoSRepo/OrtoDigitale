@@ -1,0 +1,25 @@
+{
+	email admin@orto.local
+}
+
+orto.local, 192.168.1.12, 192.168.1.46 {
+	tls internal
+	encode gzip
+
+	handle /api/* {
+		reverse_proxy nodered:1880
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+
+	log {
+		output file /data/access.log {
+			roll_size 10mb
+			roll_keep 5
+		}
+	}
+}
