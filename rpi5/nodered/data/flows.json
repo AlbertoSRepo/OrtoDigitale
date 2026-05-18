@@ -1630,6 +1630,46 @@
         "wires": []
     },
     {
+        "id": "sy-http-in-stats",
+        "type": "http in",
+        "z": "f-system",
+        "name": "GET /api/system/stats",
+        "url": "/api/system/stats",
+        "method": "get",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 180,
+        "y": 160,
+        "wires": [["sy-fn-stats"]]
+    },
+    {
+        "id": "sy-fn-stats",
+        "type": "function",
+        "z": "f-system",
+        "name": "read host stats + augment",
+        "func": "// Legge il JSON scritto sull'host dal timer orto-system-stats.timer\n// (rpi5/scripts/system_stats.sh) e bind-mountato RO nel container come\n// /data/host-system/stats.json. Aggiunge age_seconds e stale (>60s).\n// Step 9 - vedi docs/step9_settings_system_stats.md.\nconst STATS_PATH = '/data/host-system/stats.json';\n\nfunction respond(payload, status) {\n    msg.statusCode = status || 200;\n    msg.headers = { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' };\n    msg.payload = payload;\n    return msg;\n}\n\ntry {\n    const raw = await fs.promises.readFile(STATS_PATH, 'utf8');\n    const parsed = JSON.parse(raw);\n    const generated_ms = Date.parse(parsed.generated_at);\n    const age_seconds = Number.isFinite(generated_ms)\n        ? Math.max(0, Math.round((Date.now() - generated_ms) / 1000))\n        : null;\n    parsed.age_seconds = age_seconds;\n    parsed.stale = age_seconds !== null && age_seconds > 60;\n    node.status({ fill: parsed.stale ? 'yellow' : 'green', shape: 'dot', text: 'age ' + age_seconds + 's' });\n    return respond(parsed);\n} catch (e) {\n    node.status({ fill: 'red', shape: 'dot', text: 'read fail' });\n    node.warn('system stats read fail: ' + e.message);\n    return respond({ error: 'system stats unavailable', code: 503 }, 503);\n}\n",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [{"var": "fs", "module": "fs"}],
+        "x": 440,
+        "y": 160,
+        "wires": [["sy-http-resp-stats"]]
+    },
+    {
+        "id": "sy-http-resp-stats",
+        "type": "http response",
+        "z": "f-system",
+        "name": "resp",
+        "statusCode": "",
+        "headers": {},
+        "x": 680,
+        "y": 160,
+        "wires": []
+    },
+    {
         "id": "sy-http-in-shutdown",
         "type": "http in",
         "z": "f-system",

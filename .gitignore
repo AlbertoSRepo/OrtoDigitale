@@ -28,6 +28,12 @@ rpi5/mosquitto/data/
 rpi5/mosquitto/log/
 
 # -----------------------------------------------
+# Snapshot risorse host (scritto dal timer systemd sull'RPi)
+# -----------------------------------------------
+rpi5/system-out/stats.json
+rpi5/system-out/*.tmp
+
+# -----------------------------------------------
 # Claude Code (configurazione locale IDE)
 # -----------------------------------------------
 .claude/
