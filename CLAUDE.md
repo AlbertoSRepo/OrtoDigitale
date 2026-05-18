@@ -155,8 +155,8 @@ Il GW3000 pubblica **tutti i sensori** in un unico topic `ecowitt/gw3000` come s
 | 6 | Frontend PWA — SPA Vite/React/Recharts | ✅ |
 | 7 | Frontend PWA — installable + offline (Workbox) | ✅ |
 | 8 | Meteo Open-Meteo nel frontend (no storicizzazione) | ✅ |
-| 9 | Settings: statistiche di sistema RPi5 (disco / CPU / RAM) | ⏳ Prossimo |
-| 10 | Archiviazione CSV su USB | ⏳ |
+| 9 | Settings: statistiche di sistema RPi5 (disco / CPU / RAM) | ✅ |
+| 10 | Archiviazione CSV su USB | ⏳ Prossimo |
 
 ---
 
