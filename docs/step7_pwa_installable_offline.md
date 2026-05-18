@@ -344,3 +344,34 @@ Eventuali warning su "Does not provide a valid apple-touch-icon" → aggiungere 
 - **iOS / Safari install:** Safari supporta "Add to Home Screen" ma con limitazioni (no install prompt, SW più restrittivo). Per ora si testa solo su Android Chrome; iOS funziona "best effort".
 - **App store distribution (TWA, PWA Builder):** la PWA su LAN privata non ha senso pubblicarla su Play Store.
 - **Auto-updates senza prompt:** scelta esplicita di mostrare prompt per non sorprendere l'utente con reload inattesi.
+
+---
+## Implementazione
+**Stato:** ✅ COMPLETATO — 2026-05-18
+**Commit di riferimento:** `feat(frontend): PWA installable + offline support`
+**Note:**
+- `vite-plugin-pwa@^1.3` + `workbox-window@^7.4` integrati in `rpi5/frontend/`.
+- Service Worker generato in `dist/sw.js` (modalità `generateSW`), 20 entries precachate (~5.5 MiB inclusa ortophoto). `maximumFileSizeToCacheInBytes` portato a 5 MiB per coprire `ortophoto.jpg` (4 MB).
+- Manifest inline emette `dist/manifest.webmanifest` con `name`, `short_name`, `start_url=/`, `scope=/`, `display=standalone`, `theme_color=#5b6f47`, `background_color=#f4efe6`, `orientation=portrait-primary`, `lang=it`.
+- Runtime caching:
+  - `NetworkFirst` (3 s timeout, TTL 1 h) per `/api/sensors/last`, `/api/valve/state`, `/api/weather/now`, `/api/system/health`.
+  - `StaleWhileRevalidate` (TTL 24 h) per `/api/sensors/trend`, `/api/valve/intervals`, `/api/valve/cumulative`, `/api/weather/forecast`.
+  - `CacheFirst` (TTL 30 g) per immagini.
+  - `StaleWhileRevalidate` aggiunto anche per Google Fonts (`fonts.googleapis.com` + `fonts.gstatic.com`), così l'app shell carica con font corretti anche offline.
+- Icone PWA generate via `scripts/generate-icons.mjs` (sharp + rsvg) a partire da un SVG inline (foglia moss `#5b6f47` + goccia terra `#a05e44` su sfondo paper `#f4efe6`). Output in `public/icons/`: `icon-192.png`, `icon-512.png`, `icon-512-maskable.png` (safe zone ~78%). Comando: `npm run icons`.
+- `index.html` esteso con `<meta name="theme-color">`, `<link rel="apple-touch-icon">`, `apple-mobile-web-app-capable`, `apple-mobile-web-app-status-bar-style`, `apple-mobile-web-app-title`.
+- Componenti React aggiunti:
+  - `src/components/UpdatePrompt.tsx` — usa `useRegisterSW` (registerType `prompt`): mostra toast "Nuova versione disponibile" + bottoni `Aggiorna` / `Più tardi`; gestisce anche `onOfflineReady`.
+  - `src/components/OfflineBanner.tsx` — combina `useOnlineStatus` (navigator.onLine + listener) e `dataUpdatedAt` della query `['sensors','last']` per mostrare banner sticky con etichetta relativa (es. "ultimi dati 2m fa"). Soglia stale: 30 s.
+  - `src/helpers/useOnlineStatus.ts` — hook con event listeners `online`/`offline`.
+  - `src/components/ValveCard.tsx` — bottoni "apri/chiudi" e durate disabilitati quando `!isOnline`, tooltip "Comandi non disponibili offline".
+- Stili: blocchi `.offline-banner` e `.pwa-toast` aggiunti in fondo a `src/styles/global.css`, palette `--terra` per il banner, paper/ink per il toast, responsive su < 700 px.
+- Type references PWA in nuovo `src/vite-env.d.ts` (`virtual:pwa-register/react`).
+- Caddy non richiede modifiche: serve già il contenuto di `/srv` (mount `/opt/orto-digitale/frontend/dist/`) con MIME corretto per `manifest.webmanifest` e `sw.js` (verificato con curl: 200, `application/manifest+json` / `text/javascript`).
+- Deploy verificato: `scp -r dist/* as@192.168.1.12:/opt/orto-digitale/frontend/dist/`; healthcheck `verify_rpi5.sh` verde post-deploy (12/12 check ok).
+
+**Deviazioni dalla spec:**
+- Service Worker registrato da `UpdatePrompt` (via `useRegisterSW`) anziché direttamente in `src/main.tsx`. Risultato equivalente — il componente è sempre montato in `App.tsx` — ma mantiene la logica vicina al toast che la consuma.
+- Aggiunta una runtime caching extra per Google Fonts (non in spec): senza, l'app shell offline perde i font. Cache `StaleWhileRevalidate` con TTL 1 anno.
+- `maximumFileSizeToCacheInBytes` portato a 5 MiB (default Workbox è 2 MiB) per consentire la precache di `ortophoto.jpg` (4 MB). In alternativa avremmo dovuto comprimerla o spostarla su runtime cache.
+- Icone disegnate inline via SVG + sharp anziché `pwa-asset-generator` (che richiede Chromium e download di ~150 MB). Risultato equivalente sulla forma richiesta (192/512/512-maskable), riproducibile con `npm run icons`.
