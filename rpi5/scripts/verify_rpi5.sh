@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # verify_rpi5.sh — Healthcheck completo stack Orto Digitale su Raspberry Pi 5.
-# Esegue 12 controlli e stampa un report colorato. Exit code != 0 se almeno un check fallisce.
+# Esegue 13 controlli e stampa un report colorato. Exit code != 0 se almeno un check fallisce.
 #
 # Uso:
 #   bash /opt/orto-digitale/scripts/verify_rpi5.sh
@@ -320,6 +320,45 @@ if pgrep -f sensor_simulator >/dev/null 2>&1; then
   check_warn "sensor_simulator ATTIVO — dati finti in arrivo su MQTT. Fermarlo prima di usare GW3000 reale."
 else
   check_ok "sensor_simulator fermo"
+fi
+
+# ---------------------------------------------------------------------------
+# [13] Weather endpoints v2 (step 8)
+# ---------------------------------------------------------------------------
+section "Weather endpoints v2 (step 8)"
+
+WEATHER_NOW_V2=$(curl -sfk --max-time 8 --resolve "$CADDY_RESOLVE" "${CADDY_BASE}/api/weather/now-v2" 2>/dev/null || echo "")
+if [ -n "$WEATHER_NOW_V2" ]; then
+  if command -v jq >/dev/null 2>&1; then
+    if echo "$WEATHER_NOW_V2" | jq -e '.temperature_c != null' >/dev/null 2>&1; then
+      TEMP=$(echo "$WEATHER_NOW_V2" | jq -r '.temperature_c')
+      AGE=$(echo "$WEATHER_NOW_V2" | jq -r '.age_seconds // "?"')
+      STALE=$(echo "$WEATHER_NOW_V2" | jq -r '.stale // false')
+      check_ok "/api/weather/now-v2 OK (temp=${TEMP}°C, age=${AGE}s, stale=${STALE})"
+    else
+      check_warn "/api/weather/now-v2 risponde ma temperature_c=null (provider down o cache vuota?)"
+    fi
+  else
+    check_ok "/api/weather/now-v2 risponde (jq non installato, skip parse)"
+  fi
+else
+  check_warn "/api/weather/now-v2 non risponde (flow Node-RED non ancora deployato?)"
+fi
+
+WEATHER_FC_V2=$(curl -sfk --max-time 8 --resolve "$CADDY_RESOLVE" "${CADDY_BASE}/api/weather/forecast-v2" 2>/dev/null || echo "")
+if [ -n "$WEATHER_FC_V2" ]; then
+  if command -v jq >/dev/null 2>&1; then
+    DAYS=$(echo "$WEATHER_FC_V2" | jq -r '.days | length' 2>/dev/null || echo "0")
+    if [ "${DAYS:-0}" -ge 7 ]; then
+      check_ok "/api/weather/forecast-v2 OK (days=${DAYS})"
+    else
+      check_warn "/api/weather/forecast-v2 risponde ma days=${DAYS} (atteso ≥7)"
+    fi
+  else
+    check_ok "/api/weather/forecast-v2 risponde (jq non installato, skip parse)"
+  fi
+else
+  check_warn "/api/weather/forecast-v2 non risponde (flow Node-RED non ancora deployato?)"
 fi
 
 # ---------------------------------------------------------------------------

@@ -1770,5 +1770,66 @@
         "x": 1300,
         "y": 340,
         "wires": []
+    },
+    {
+        "id": "f-weather-frontend",
+        "type": "tab",
+        "label": "Weather Frontend v2 (step 8)",
+        "disabled": false,
+        "info": "Endpoint dedicati alla PWA con cache in-memory (TTL 5 min).\nGET /api/weather/now-v2\nGET /api/weather/forecast-v2\n\nDisaccoppiato da f-weather (step 4): NON scrive su InfluxDB, NON alimenta la logica irrigazione.\nUsa una singola chiamata Open-Meteo per servire entrambi gli endpoint.\nFallback: se la chiamata fallisce e c'è una cache pre-esistente, risponde con stale: true.\nCold start senza cache + provider giù -> 503.",
+        "env": []
+    },
+    {
+        "id": "wf-http-in-now",
+        "type": "http in",
+        "z": "f-weather-frontend",
+        "name": "GET /api/weather/now-v2",
+        "url": "/api/weather/now-v2",
+        "method": "get",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 180,
+        "y": 100,
+        "wires": [["wf-fn-handle"]]
+    },
+    {
+        "id": "wf-http-in-forecast",
+        "type": "http in",
+        "z": "f-weather-frontend",
+        "name": "GET /api/weather/forecast-v2",
+        "url": "/api/weather/forecast-v2",
+        "method": "get",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 200,
+        "y": 200,
+        "wires": [["wf-fn-handle"]]
+    },
+    {
+        "id": "wf-fn-handle",
+        "type": "function",
+        "z": "f-weather-frontend",
+        "name": "cache + fetch + format",
+        "func": "const TTL_MS = ((global.get('irrigation_config') || {}).weather_frontend_cache_ttl_seconds || 300) * 1000;\nconst cfg = global.get('irrigation_config') || {};\nconst lat = (cfg.weather && cfg.weather.lat) || 45.71722434055733;\nconst lon = (cfg.weather && cfg.weather.lon) || 9.733793667999565;\nconst apiBase = (cfg.weather && cfg.weather.api_url) || 'https://api.open-meteo.com/v1/forecast';\nconst isForecast = msg.req && msg.req.url && msg.req.url.indexOf('forecast') >= 0;\n\nfunction val(arr, i) {\n    if (!arr || !Array.isArray(arr) || i >= arr.length) return null;\n    const v = arr[i];\n    return Number.isFinite(v) ? v : (v === null || v === undefined ? null : v);\n}\n\nfunction buildNow(cache, stale) {\n    const body = (cache && cache.raw) || {};\n    const cur = body.current || {};\n    const daily = body.daily || {};\n    return {\n        fetched_at: new Date(cache.fetched_at).toISOString(),\n        age_seconds: Math.max(0, Math.round((Date.now() - cache.fetched_at) / 1000)),\n        stale: !!stale,\n        source: 'openmeteo',\n        temperature_c: Number.isFinite(cur.temperature_2m) ? cur.temperature_2m : null,\n        apparent_temperature_c: Number.isFinite(cur.apparent_temperature) ? cur.apparent_temperature : null,\n        humidity_pct: Number.isFinite(cur.relative_humidity_2m) ? cur.relative_humidity_2m : null,\n        precipitation_mm_last_hour: Number.isFinite(cur.precipitation) ? cur.precipitation : null,\n        wind_speed_kmh: Number.isFinite(cur.wind_speed_10m) ? cur.wind_speed_10m : null,\n        wind_direction_deg: Number.isFinite(cur.wind_direction_10m) ? cur.wind_direction_10m : null,\n        weather_code: Number.isFinite(cur.weather_code) ? cur.weather_code : null,\n        today: {\n            t_min: val(daily.temperature_2m_min, 0),\n            t_max: val(daily.temperature_2m_max, 0),\n            precip_sum_mm: val(daily.precipitation_sum, 0),\n            precip_probability_pct: val(daily.precipitation_probability_max, 0),\n            sunrise: val(daily.sunrise, 0),\n            sunset: val(daily.sunset, 0)\n        }\n    };\n}\n\nfunction buildForecast(cache, stale) {\n    const body = (cache && cache.raw) || {};\n    const daily = body.daily || {};\n    const dates = daily.time || [];\n    const days = [];\n    for (let i = 0; i < dates.length; i++) {\n        days.push({\n            date: dates[i],\n            weather_code: val(daily.weather_code, i),\n            t_min: val(daily.temperature_2m_min, i),\n            t_max: val(daily.temperature_2m_max, i),\n            precip_sum_mm: val(daily.precipitation_sum, i),\n            precip_probability_pct: val(daily.precipitation_probability_max, i),\n            wind_speed_max_kmh: val(daily.wind_speed_10m_max, i),\n            sunrise: val(daily.sunrise, i),\n            sunset: val(daily.sunset, i)\n        });\n    }\n    return {\n        fetched_at: new Date(cache.fetched_at).toISOString(),\n        age_seconds: Math.max(0, Math.round((Date.now() - cache.fetched_at) / 1000)),\n        stale: !!stale,\n        source: 'openmeteo',\n        days: days\n    };\n}\n\nfunction respond(payload, status) {\n    msg.statusCode = status || 200;\n    msg.headers = { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' };\n    msg.payload = payload;\n    return msg;\n}\n\nfunction build(cache, stale) { return isForecast ? buildForecast(cache, stale) : buildNow(cache, stale); }\n\nconst cache = global.get('weather_frontend_cache');\nconst now = Date.now();\nconst isFresh = cache && cache.ok && (now - cache.fetched_at) < TTL_MS;\n\nif (isFresh) {\n    node.status({ fill: 'green', shape: 'dot', text: 'cache hit' });\n    return respond(build(cache, false));\n}\n\nif (global.get('weather_fetch_in_flight') && cache && cache.ok) {\n    node.status({ fill: 'yellow', shape: 'ring', text: 'in-flight, serve stale' });\n    return respond(build(cache, true));\n}\n\nglobal.set('weather_fetch_in_flight', true);\ntry {\n    const url = apiBase + '?latitude=' + lat + '&longitude=' + lon + '&timezone=Europe/Rome' + '&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,wind_direction_10m' + '&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,sunrise,sunset,wind_speed_10m_max' + '&hourly=precipitation' + '&forecast_days=7';\n    const res = await fetch(url);\n    if (!res.ok) throw new Error('status ' + res.status);\n    const body = await res.json();\n    const newCache = { fetched_at: Date.now(), source: 'openmeteo', ok: true, raw: body };\n    global.set('weather_frontend_cache', newCache);\n    global.set('weather_fetch_in_flight', false);\n    node.status({ fill: 'green', shape: 'dot', text: 'fetch ok @ ' + new Date().toISOString().substr(11, 8) });\n    return respond(build(newCache, false));\n} catch (e) {\n    global.set('weather_fetch_in_flight', false);\n    node.warn('weather frontend fetch fail: ' + e.message);\n    if (cache && cache.ok) {\n        node.status({ fill: 'red', shape: 'ring', text: 'fail, serve stale' });\n        return respond(build(cache, true));\n    }\n    node.status({ fill: 'red', shape: 'dot', text: 'fail, no cache -> 503' });\n    return respond({ error: 'weather provider unreachable', code: 503 }, 503);\n}\n",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 480,
+        "y": 150,
+        "wires": [["wf-http-response"]]
+    },
+    {
+        "id": "wf-http-response",
+        "type": "http response",
+        "z": "f-weather-frontend",
+        "name": "resp",
+        "statusCode": "",
+        "headers": {},
+        "x": 760,
+        "y": 150,
+        "wires": []
     }
 ]
