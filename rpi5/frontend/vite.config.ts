@@ -40,6 +40,8 @@ export default defineConfig({
             urlPattern: ({ url }) =>
               url.pathname.startsWith('/api/sensors/last') ||
               url.pathname.startsWith('/api/valve/state') ||
+              url.pathname.startsWith('/api/weather/now-v2') ||
+              url.pathname.startsWith('/api/weather/forecast-v2') ||
               url.pathname.startsWith('/api/weather/now') ||
               url.pathname.startsWith('/api/system/health'),
             handler: 'NetworkFirst',

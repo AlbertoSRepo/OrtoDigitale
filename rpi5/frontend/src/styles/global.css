@@ -1220,6 +1220,49 @@ button { font-family: inherit; }
   color: var(--ink-3);
 }
 
+/* Header riga eyebrow + badge freschezza */
+.weather-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.weather-fresh {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-feature-settings: "tnum";
+}
+.weather-fresh.is-stale {
+  color: var(--terra);
+  border: 0.5px solid var(--terra);
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.weather-apparent {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+  margin-top: -2px;
+  font-feature-settings: "tnum";
+}
+
+.weather-kv {
+  max-width: 360px;
+  margin-top: 6px;
+}
+.weather-kv .wind-compass {
+  color: var(--ink-3);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+}
+
 .forecast {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
@@ -1259,6 +1302,13 @@ button { font-family: inherit; }
   font-family: var(--mono);
   font-size: 11px;
   color: var(--ink-3);
+}
+.forecast .day .precip-prob {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--water-2, var(--ink-3));
+  font-feature-settings: "tnum";
 }
 
 /* ─── Tab nav ────────────────────────────────────────────────────────────── */

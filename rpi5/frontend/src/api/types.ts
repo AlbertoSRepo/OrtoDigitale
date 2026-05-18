@@ -58,6 +58,50 @@ export interface WeatherForecastDay {
   weather_code: number | null;
 }
 
+export interface WeatherTodayV2 {
+  t_min: number | null;
+  t_max: number | null;
+  precip_sum_mm: number | null;
+  precip_probability_pct: number | null;
+  sunrise: string | null;
+  sunset: string | null;
+}
+
+export interface WeatherNowV2 {
+  fetched_at: string | null;
+  age_seconds: number;
+  stale: boolean;
+  source: string;
+  temperature_c: number | null;
+  apparent_temperature_c: number | null;
+  humidity_pct: number | null;
+  precipitation_mm_last_hour: number | null;
+  wind_speed_kmh: number | null;
+  wind_direction_deg: number | null;
+  weather_code: number | null;
+  today: WeatherTodayV2;
+}
+
+export interface WeatherDay {
+  date: string;
+  weather_code: number | null;
+  t_min: number | null;
+  t_max: number | null;
+  precip_sum_mm: number | null;
+  precip_probability_pct: number | null;
+  wind_speed_max_kmh: number | null;
+  sunrise: string | null;
+  sunset: string | null;
+}
+
+export interface WeatherForecastV2 {
+  fetched_at: string | null;
+  age_seconds: number;
+  stale: boolean;
+  source: string;
+  days: WeatherDay[];
+}
+
 export interface SystemHealth {
   uptime_seconds: number;
   timestamp: number;
