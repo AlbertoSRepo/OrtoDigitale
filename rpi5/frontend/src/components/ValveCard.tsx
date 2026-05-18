@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ValveState } from '../api/types';
 import { useCloseValve, useOpenValve } from '../api/valve';
 import { useTick } from '../helpers/useTick';
+import { useOnlineStatus } from '../helpers/useOnlineStatus';
 import { fmtClock, fmtHM } from '../helpers/formatDuration';
 import { fmtRelative } from '../helpers/formatDate';
 
@@ -24,6 +25,7 @@ export function ValveCard({ valve, cumulativeSeconds, cumulativeLabel, loading }
   const [pickerOpen, setPickerOpen] = useState(false);
   const [feedback, setFeedback] = useState<{ ok: boolean; text: string } | null>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
+  const isOnline = useOnlineStatus();
 
   const openMut = useOpenValve();
   const closeMut = useCloseValve();
@@ -180,10 +182,11 @@ export function ValveCard({ valve, cumulativeSeconds, cumulativeLabel, loading }
           <button
             className="valve-btn valve-btn-overlay"
             onClick={onPrimary}
-            disabled={mutating || isLoading}
+            disabled={mutating || isLoading || !isOnline}
             aria-haspopup={isOpen ? undefined : 'dialog'}
             aria-expanded={isOpen ? undefined : pickerOpen}
             aria-label={isOpen ? 'chiudi valvola' : 'apri valvola'}
+            title={!isOnline ? 'Comandi non disponibili offline' : undefined}
           >
             <span className="ring-anim" />
             <span className="label">
@@ -202,7 +205,8 @@ export function ValveCard({ valve, cumulativeSeconds, cumulativeLabel, loading }
                     type="button"
                     className="dur-chip"
                     onClick={() => pickDuration(d.sec)}
-                    disabled={mutating}
+                    disabled={mutating || !isOnline}
+                    title={!isOnline ? 'Comandi non disponibili offline' : undefined}
                   >
                     {d.label}
                   </button>

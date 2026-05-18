@@ -1,6 +1,8 @@
 import { useEffect } from 'react';
 import { useStore } from './state/store';
 import { Topbar } from './components/Topbar';
+import { OfflineBanner } from './components/OfflineBanner';
+import { UpdatePrompt } from './components/UpdatePrompt';
 import { Orto } from './pages/Orto';
 import { Waterflow } from './pages/Waterflow';
 import { Settings } from './pages/Settings';
@@ -15,6 +17,7 @@ export function App() {
 
   return (
     <div className="app">
+      <OfflineBanner />
       <Topbar />
       <main>
         {activeTab === 'orto' && <Orto />}
@@ -25,6 +28,7 @@ export function App() {
         <span>orto digitale · v0.1</span>
         <span>{new Date().toLocaleDateString('it-IT', { day: '2-digit', month: 'long', year: 'numeric' })}</span>
       </footer>
+      <UpdatePrompt />
     </div>
   );
 }
