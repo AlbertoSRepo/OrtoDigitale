@@ -1,0 +1,6 @@
+# Placeholder per la directory bind-mountata RO nel container nodered
+# (vedi rpi5/docker-compose.yml service nodered: ./system-out:/data/host-system:ro).
+#
+# Il file system-out/stats.json viene scritto sull'host RPi5 dal timer
+# orto-system-stats.timer (vedi rpi5/scripts/orto-system-stats.{service,timer})
+# e ignorato da git (vedi .gitignore).

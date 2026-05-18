@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # verify_rpi5.sh — Healthcheck completo stack Orto Digitale su Raspberry Pi 5.
-# Esegue 13 controlli e stampa un report colorato. Exit code != 0 se almeno un check fallisce.
+# Esegue 15 controlli e stampa un report colorato. Exit code != 0 se almeno un check fallisce.
 #
 # Uso:
 #   bash /opt/orto-digitale/scripts/verify_rpi5.sh
@@ -359,6 +359,54 @@ if [ -n "$WEATHER_FC_V2" ]; then
   fi
 else
   check_warn "/api/weather/forecast-v2 non risponde (flow Node-RED non ancora deployato?)"
+fi
+
+# ---------------------------------------------------------------------------
+# [14] System stats watcher (step 9)
+# ---------------------------------------------------------------------------
+section "System stats watcher (step 9)"
+
+STATS_FILE="${PROJECT_DIR}/system-out/stats.json"
+
+if systemctl is-active --quiet orto-system-stats.timer 2>/dev/null; then
+  check_ok "orto-system-stats.timer attivo"
+else
+  check_ko "orto-system-stats.timer NON attivo (systemctl enable --now orto-system-stats.timer?)"
+fi
+
+if [ -f "$STATS_FILE" ]; then
+  STATS_AGE=$(( $(date +%s) - $(stat -c %Y "$STATS_FILE") ))
+  if [ "$STATS_AGE" -lt 30 ]; then
+    check_ok "$STATS_FILE aggiornato ${STATS_AGE}s fa"
+  else
+    check_ko "$STATS_FILE stale (${STATS_AGE}s fa, atteso < 30s)"
+  fi
+else
+  check_ko "$STATS_FILE mancante (script non ancora eseguito? esegui: sudo -u as $PROJECT_DIR/scripts/system_stats.sh)"
+fi
+
+# ---------------------------------------------------------------------------
+# [15] /api/system/stats endpoint (step 9)
+# ---------------------------------------------------------------------------
+section "/api/system/stats endpoint (step 9)"
+
+STATS_JSON=$(curl -sfk --max-time 5 --resolve "$CADDY_RESOLVE" "${CADDY_BASE}/api/system/stats" 2>/dev/null || echo "")
+if [ -n "$STATS_JSON" ]; then
+  if command -v jq >/dev/null 2>&1; then
+    if echo "$STATS_JSON" | jq -e '.disk.used_pct != null and .ram.used_pct != null and .cpu.used_pct != null' >/dev/null 2>&1; then
+      DPCT=$(echo "$STATS_JSON" | jq -r '.disk.used_pct')
+      RPCT=$(echo "$STATS_JSON" | jq -r '.ram.used_pct')
+      CPCT=$(echo "$STATS_JSON" | jq -r '.cpu.used_pct')
+      AGE=$(echo "$STATS_JSON" | jq -r '.age_seconds // "?"')
+      check_ok "/api/system/stats OK (disk=${DPCT}%, ram=${RPCT}%, cpu=${CPCT}%, age=${AGE}s)"
+    else
+      check_warn "/api/system/stats risponde ma campi mancanti (flow non aggiornato? mount RO ok?)"
+    fi
+  else
+    check_ok "/api/system/stats risponde (jq non installato, skip parse)"
+  fi
+else
+  check_warn "/api/system/stats non risponde (flow Node-RED non ancora deployato? bind mount mancante?)"
 fi
 
 # ---------------------------------------------------------------------------

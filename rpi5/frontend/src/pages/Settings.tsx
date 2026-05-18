@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useStore } from '../state/store';
 import { useShutdown, useShutdownCancel, useSystemHealth } from '../api/system';
 import { ShutdownModal } from '../components/ShutdownModal';
+import { SystemStats } from '../components/SystemStats';
 import { fmtHM } from '../helpers/formatDuration';
 
 const APP_VERSION = '0.1.0';
@@ -78,6 +79,16 @@ export function Settings() {
                   sensorsOnline={health?.sensors_online ?? 0}
                   sensorsTotal={health?.sensors_total ?? 6}
                 />
+              </div>
+            </div>
+
+            <div className="settings-row">
+              <div className="settings-row-text">
+                <div className="settings-label">Sistema</div>
+                <div className="settings-sub">disco · cpu · ram · temperatura</div>
+              </div>
+              <div className="settings-action" style={{ textAlign: 'right' }}>
+                <SystemStats />
               </div>
             </div>
 

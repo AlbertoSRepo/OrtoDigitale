@@ -1529,6 +1529,71 @@ button { font-family: inherit; }
 .set-btn-danger { color: var(--terra); border-color: var(--terra); }
 .set-btn-danger:hover { background: var(--terra); color: var(--paper); border-color: var(--terra); }
 
+/* ─── Settings: System stats (step 9) ─────────────────────────────────── */
+.sys-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-end;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-3);
+}
+.sys-row {
+  display: grid;
+  grid-template-columns: 60px 140px 56px auto;
+  align-items: center;
+  gap: 10px;
+}
+.sys-row .sys-label {
+  font-family: var(--sans);
+  font-size: 12px;
+  color: var(--ink);
+  letter-spacing: 0.02em;
+}
+.sys-pct {
+  text-align: right;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.sys-detail {
+  color: var(--ink-3);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.sys-temp {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 2px;
+}
+.bar {
+  width: 140px;
+  height: 6px;
+  background: var(--rule-2);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 240ms var(--ease), background 240ms var(--ease);
+}
+.bar-fill.bar-green { background: var(--bar-green); }
+.bar-fill.bar-yellow { background: var(--bar-yellow); }
+.bar-fill.bar-red { background: var(--bar-red); }
+.badge-warn {
+  align-self: flex-end;
+  margin-top: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--terra);
+  color: var(--terra);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 /* ─── Confirm popover (anchored to action button) ─────────────────────── */
 .confirm-pop {
   position: absolute;

@@ -1,0 +1,11 @@
+[Unit]
+Description=Orto Digitale - timer snapshot risorse host (ogni 10s)
+
+[Timer]
+OnBootSec=15s
+OnUnitActiveSec=10s
+AccuracySec=1s
+Unit=orto-system-stats.service
+
+[Install]
+WantedBy=timers.target

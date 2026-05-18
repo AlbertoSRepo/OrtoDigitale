@@ -114,6 +114,39 @@ export interface SystemHealth {
   weather_last_poll_seconds_ago: number | null;
 }
 
+export interface SystemStatsDisk {
+  total_bytes: number;
+  used_bytes: number;
+  free_bytes: number;
+  used_pct: number;
+}
+
+export interface SystemStatsRam {
+  total_bytes: number;
+  used_bytes: number;
+  free_bytes: number;
+  used_pct: number;
+}
+
+export interface SystemStatsCpu {
+  used_pct: number;
+  load_avg_1_5_15: [number, number, number];
+}
+
+export interface SystemStatsThermal {
+  soc_temp_c: number | null;
+}
+
+export interface SystemStats {
+  generated_at: string;
+  age_seconds: number | null;
+  stale: boolean;
+  disk: SystemStatsDisk;
+  ram: SystemStatsRam;
+  cpu: SystemStatsCpu;
+  thermal: SystemStatsThermal;
+}
+
 export interface ShutdownAck {
   ok: boolean;
   scheduled_in_seconds: number;

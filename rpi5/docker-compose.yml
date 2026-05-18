@@ -79,6 +79,7 @@ services:
       - "1880:1880"
     volumes:
       - ./nodered/data:/data
+      - ./system-out:/data/host-system:ro
     environment:
       - TZ=Europe/Rome
       - INFLUX_TOKEN_NODERED_RW=${INFLUX_TOKEN_NODERED_RW}

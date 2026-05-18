@@ -1,0 +1,8 @@
+[Unit]
+Description=Orto Digitale - snapshot risorse host (disco/CPU/RAM/temp) -> JSON per Node-RED
+After=multi-user.target
+
+[Service]
+Type=oneshot
+User=as
+ExecStart=/opt/orto-digitale/scripts/system_stats.sh

@@ -43,7 +43,8 @@ export default defineConfig({
               url.pathname.startsWith('/api/weather/now-v2') ||
               url.pathname.startsWith('/api/weather/forecast-v2') ||
               url.pathname.startsWith('/api/weather/now') ||
-              url.pathname.startsWith('/api/system/health'),
+              url.pathname.startsWith('/api/system/health') ||
+              url.pathname.startsWith('/api/system/stats'),
             handler: 'NetworkFirst',
             options: {
               cacheName: 'live-data',

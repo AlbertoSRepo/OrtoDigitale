@@ -27,6 +27,10 @@
   --hm-mid: #8aab5e;
   --hm-wet: #4690b3;
 
+  --bar-green: #6f8b51;
+  --bar-yellow: #c9a227;
+  --bar-red: #c54a3e;
+
   --serif: "DM Serif Display", "Cormorant Garamond", Georgia, serif;
   --sans: "Be Vietnam Pro", "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
@@ -58,4 +62,8 @@
   --hm-dry: #e08856;
   --hm-mid: #a6c980;
   --hm-wet: #8cc0d8;
+
+  --bar-green: #88a866;
+  --bar-yellow: #e0b840;
+  --bar-red: #de6957;
 }
