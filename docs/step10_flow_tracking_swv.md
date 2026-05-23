@@ -178,6 +178,11 @@ Wired → `n-mqtt-out-valve-set` (riusa il nodo MQTT esistente: stesso broker, t
 Wired in **parallelo** a `n-fn-valve-parse` e `n-fn-valve-irrigation-event`, in uscita dal subscriber `zigbee2mqtt/SWV_valvola`.
 
 ```js
+// Ogni payload SWV in risposta ai /get include state:ON finché la valvola è
+// aperta, insieme al flow corrente. Quindi non possiamo early-return su
+// state:ON (perderemmo tutti i campioni). Tracciamo invece le transizioni
+// OFF→ON (reset) e ON→OFF (integrate) con un flag in context, e accumuliamo
+// sempre il flow se finito durante una sessione aperta.
 const cfg = global.get('irrigation_config') || {};
 const ft = (cfg.flow_tracking) || {};
 const min_samples = ft.min_samples_for_volume || 2;
@@ -187,37 +192,40 @@ if (!p || typeof p !== 'object') return null;
 
 const now = Date.now();
 let samples = context.get('flow_samples') || [];
+let session_open = context.get('session_open') || false;
 
-// Reset su transizione ON.
-if (p.state === 'ON') {
-    context.set('flow_samples', []);
-    return null;
+// Transizione OFF→ON: reset
+if (p.state === 'ON' && !session_open) {
+    samples = [];
+    session_open = true;
+    context.set('session_open', true);
 }
 
-// Push campione su payload con flow finito.
-if (Number.isFinite(p.flow)) {
+// Push campione su ogni payload con flow finito durante apertura
+if (Number.isFinite(p.flow) && session_open) {
     samples.push({ ts: now, flow_m3h: Number(p.flow) });
     context.set('flow_samples', samples);
 }
 
-// Su OFF: integra trapezoidale e pubblica risultato.
-if (p.state === 'OFF') {
+// Transizione ON→OFF: integra trapezoidale
+if (p.state === 'OFF' && session_open) {
     if (samples.length < min_samples) {
         global.set('last_irrigation_liters', null);
-        context.set('flow_samples', []);
-        return null;
+        global.set('last_irrigation_samples', samples.length);
+    } else {
+        // Integrale trapezoidale: sum( (f_i + f_{i+1})/2 * dt_i )
+        // f in m³/h, dt in s → litri = (m³/h * 1000) * (s/3600)
+        let liters = 0;
+        for (let i = 1; i < samples.length; i++) {
+            const dt_h = (samples[i].ts - samples[i-1].ts) / 3600000;
+            const f_avg = (samples[i].flow_m3h + samples[i-1].flow_m3h) / 2;
+            liters += f_avg * 1000 * dt_h;
+        }
+        global.set('last_irrigation_liters', Number(liters.toFixed(2)));
+        global.set('last_irrigation_samples', samples.length);
     }
-    // Integrale trapezoidale: sum( (f_i + f_{i+1})/2 * dt_i )
-    // f in m³/h, dt in s → litri = (m³/h * 1000) * (s/3600)
-    let liters = 0;
-    for (let i = 1; i < samples.length; i++) {
-        const dt_h = (samples[i].ts - samples[i-1].ts) / 3600000;
-        const f_avg = (samples[i].flow_m3h + samples[i-1].flow_m3h) / 2;
-        liters += f_avg * 1000 * dt_h;
-    }
-    global.set('last_irrigation_liters', Number(liters.toFixed(2)));
-    global.set('last_irrigation_samples', samples.length);
     context.set('flow_samples', []);
+    context.set('session_open', false);
 }
 
 return null;
@@ -432,3 +440,22 @@ Se il SWV non risponde a `get {flow:""}`:
 - Rimuovere la field `total_liters` dallo schema documentato in `CLAUDE.md` (era già morta de facto)
 - Procedere solo con parte (B): modifica 5.1 limitata a `water_shortage` / `water_leakage`
 - Lo step si chiude come "COMPLETATO parzialmente — sola parte (B); flussimetria rimandata a Hydro DUO"
+
+---
+## Implementazione
+**Stato:** ✅ COMPLETATO — 2026-05-23
+**Commit di riferimento:** `feat(nodered): step 10 — polling attivo flow SWV + field booleani anomalie` (d53fb9c) + fix accumulator (HEAD)
+
+**Note:**
+- **Precheck §4 PASS**: il SWV risponde a `zigbee2mqtt/SWV_valvola/get {"flow":""}` entro ~30s con payload completo includente `flow`.
+- **Wiring accumulator**: posizionato come **primo** destinatario di `n-mqtt-in-valve-state` per garantire che scriva `global.last_irrigation_liters` prima che `n-fn-valve-irrigation-event` lo legga (Node-RED dispatcha le wires in array order, sincronamente per le function pure).
+- **Bug logico iniziale dello spec §5.4 corretto**: la versione originale faceva `return null` su ogni `state === 'ON'`, ma ogni risposta del SWV ai `get` include `state: ON` finché la valvola è aperta. Il fix introduce un flag `session_open` di context per distinguere transizione OFF→ON (reset) da sample intra-sessione (push). Spec §5.4 aggiornato di conseguenza.
+- **Verifica end-to-end (apertura manuale 150s)**: `liters_method=integrated`, `liters_sample_count=8`, `total_liters=0` (atteso: SWV in `water_shortage` perché rubinetto a monte chiuso → `flow=0` su tutti i sample → integrazione di zeri). I litri reali compariranno alla prima apertura con acqua effettivamente disponibile.
+- **Parte (B)**: `water_shortage=true` / `water_leakage=false` correttamente popolati come field booleani su `valve_state`, accanto alla stringa originale `current_device_status` (preservata).
+- **Healthcheck**: 15/15 verde post-deploy.
+- **Footgun §3 confermato**: ogni redeploy `flows.json` ha richiesto re-iniezione credenziali via API `/flows` POST (procedura `comandi_verifica.md §5.5`).
+
+**Deviazioni dalla spec:**
+1. **No nodo MQTT out dedicato**: `n-mqtt-out-valve-set` (linea 269) ha già `"topic": ""` (dinamico via `msg.topic`), riusato direttamente. Annulla la nota di §5.3 sul potenziale `n-mqtt-out-valve-get`.
+2. **Accumulator logic** sostanzialmente riscritto rispetto allo spec §5.4 per gestire il fatto che ogni payload SWV include `state` (cfr. nota sopra). Spec §5.4 aggiornato per coerenza.
+3. **`liters_sample_count` salvato anche nel ramo fallback** (`< min_samples_for_volume`) — diagnostica utile per capire perché un'apertura ha `liters_method=unavailable`.
