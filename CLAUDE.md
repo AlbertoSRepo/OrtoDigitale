@@ -135,10 +135,13 @@ Il GW3000 pubblica **tutti i sensori** in un unico topic `ecowitt/gw3000` come s
 |---|---|
 | Soglia apertura | < 40% umidità media |
 | Soglia chiusura | > 65% umidità media |
-| Durata max | 15 min (safety timeout) |
+| Durata max auto-irrigazione | 15 min (`safety_timeout_seconds = 900`) |
+| Durata max apertura manuale | 1 h (`manual_max_duration_seconds = 3600`) |
 | Cooldown | 4 ore tra irrigazioni |
 | Finestre orarie | 06:00–08:00 e 19:00–21:00 |
 | Polling | ogni 5 min |
+
+> **Distinzione safety:** l'auto-irrigazione (decision loop) è limitata a `safety_timeout_seconds`; le aperture manuali da frontend/API accettano durate fino a `manual_max_duration_seconds`. I due cap sono in `rpi5/nodered/data/irrigation_config.json` → sezione `irrigation`.
 
 ---
 
