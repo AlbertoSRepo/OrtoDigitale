@@ -5,6 +5,7 @@
     "soglia_emergenza_pct": 25,
     "cooldown_seconds": 7200,
     "safety_timeout_seconds": 900,
+    "manual_max_duration_seconds": 3600,
     "emergency_duration_seconds": 300,
     "finestra_mattina": ["06:00", "08:00"],
     "finestra_sera": ["19:00", "21:00"],
@@ -29,6 +30,11 @@
     "max_age_seconds": 1800,
     "min_quorum": 2,
     "stddev_warning_pct": 25
+  },
+  "flow_tracking": {
+    "enabled": true,
+    "poll_interval_seconds": 60,
+    "min_samples_for_volume": 2
   },
   "mode": "dry_run",
   "pause_until": null

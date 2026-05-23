@@ -92,8 +92,8 @@ Utenti in `mosquitto/config/password_file`: `gw3000`, `nodered`, `zigbee2mqtt`, 
 | Measurement | Tag | Field |
 |---|---|---|
 | `soil_moisture` | `sensor_id` (WH51_01–06), `aiuola` (1/2/3), `position` (near/far) | `value` (float %), `battery_voltage`, `battery_ok`, `rssi` |
-| `irrigation_events` | `trigger` (auto/manual), `valve_id` | `state`, `duration_seconds`, `avg_moisture_at_trigger`, `reason` |
-| `valve_state` | `valve_id` (SWV_01) | `state` (ON/OFF), `reachable`, `linkquality` |
+| `irrigation_events` | `trigger` (auto/manual), `valve_id` | `state`, `duration_seconds`, `avg_moisture_at_trigger`, `reason`, `total_liters` (float, integrale flow), `liters_sample_count` (int), `liters_method` (`integrated`/`unavailable`) |
+| `valve_state` | `valve_id` (SWV_01) | `state` (ON/OFF), `reachable`, `linkquality`, `flow` (m³/h), `water_shortage` (bool), `water_leakage` (bool) |
 | `system_health` | `component`, `component_type` | `online`, `last_seen_seconds_ago`, `battery_low` |
 
 ## Mapping sensori → aiuole
@@ -135,10 +135,13 @@ Il GW3000 pubblica **tutti i sensori** in un unico topic `ecowitt/gw3000` come s
 |---|---|
 | Soglia apertura | < 40% umidità media |
 | Soglia chiusura | > 65% umidità media |
-| Durata max | 15 min (safety timeout) |
+| Durata max auto-irrigazione | 15 min (`safety_timeout_seconds = 900`) |
+| Durata max apertura manuale | 1 h (`manual_max_duration_seconds = 3600`) |
 | Cooldown | 4 ore tra irrigazioni |
 | Finestre orarie | 06:00–08:00 e 19:00–21:00 |
 | Polling | ogni 5 min |
+
+> **Distinzione safety:** l'auto-irrigazione (decision loop) è limitata a `safety_timeout_seconds`; le aperture manuali da frontend/API accettano durate fino a `manual_max_duration_seconds`. I due cap sono in `rpi5/nodered/data/irrigation_config.json` → sezione `irrigation`.
 
 ---
 
@@ -156,7 +159,8 @@ Il GW3000 pubblica **tutti i sensori** in un unico topic `ecowitt/gw3000` come s
 | 7 | Frontend PWA — installable + offline (Workbox) | ✅ |
 | 8 | Meteo Open-Meteo nel frontend (no storicizzazione) | ✅ |
 | 9 | Settings: statistiche di sistema RPi5 (disco / CPU / RAM) | ✅ |
-| 10 | Archiviazione CSV su USB | ⏳ Prossimo |
+| 10 | Tracciamento idrico SWV: polling attivo `flow` + field anomalie | ✅ |
+| 11 | Archiviazione CSV su USB | ⏳ Prossimo |
 
 ---
 
