@@ -31,6 +31,11 @@
     "min_quorum": 2,
     "stddev_warning_pct": 25
   },
+  "flow_tracking": {
+    "enabled": true,
+    "poll_interval_seconds": 60,
+    "min_samples_for_volume": 2
+  },
   "mode": "dry_run",
   "pause_until": null
 }

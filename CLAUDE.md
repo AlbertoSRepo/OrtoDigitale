@@ -92,8 +92,8 @@ Utenti in `mosquitto/config/password_file`: `gw3000`, `nodered`, `zigbee2mqtt`, 
 | Measurement | Tag | Field |
 |---|---|---|
 | `soil_moisture` | `sensor_id` (WH51_01–06), `aiuola` (1/2/3), `position` (near/far) | `value` (float %), `battery_voltage`, `battery_ok`, `rssi` |
-| `irrigation_events` | `trigger` (auto/manual), `valve_id` | `state`, `duration_seconds`, `avg_moisture_at_trigger`, `reason` |
-| `valve_state` | `valve_id` (SWV_01) | `state` (ON/OFF), `reachable`, `linkquality` |
+| `irrigation_events` | `trigger` (auto/manual), `valve_id` | `state`, `duration_seconds`, `avg_moisture_at_trigger`, `reason`, `total_liters` (float, integrale flow), `liters_sample_count` (int), `liters_method` (`integrated`/`unavailable`) |
+| `valve_state` | `valve_id` (SWV_01) | `state` (ON/OFF), `reachable`, `linkquality`, `flow` (m³/h), `water_shortage` (bool), `water_leakage` (bool) |
 | `system_health` | `component`, `component_type` | `online`, `last_seen_seconds_ago`, `battery_low` |
 
 ## Mapping sensori → aiuole
@@ -159,7 +159,8 @@ Il GW3000 pubblica **tutti i sensori** in un unico topic `ecowitt/gw3000` come s
 | 7 | Frontend PWA — installable + offline (Workbox) | ✅ |
 | 8 | Meteo Open-Meteo nel frontend (no storicizzazione) | ✅ |
 | 9 | Settings: statistiche di sistema RPi5 (disco / CPU / RAM) | ✅ |
-| 10 | Archiviazione CSV su USB | ⏳ Prossimo |
+| 10 | Tracciamento idrico SWV: polling attivo `flow` + field anomalie | ⏳ Prossimo |
+| 11 | Archiviazione CSV su USB | ⏳ |
 
 ---
 
