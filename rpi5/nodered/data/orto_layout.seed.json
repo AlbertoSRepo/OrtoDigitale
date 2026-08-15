@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "updated_at": 0,
+  "file": [
+    {
+      "id": 1,
+      "aree": [
+        { "crop": "pomodoro", "to": 1.0, "n": 5 }
+      ],
+      "sensori": [
+        { "sensor_id": "WH51_01", "x": 0.124 },
+        { "sensor_id": "WH51_02", "x": 0.866 }
+      ]
+    },
+    {
+      "id": 2,
+      "aree": [
+        { "crop": "libero", "to": 0.369, "n": 0 },
+        { "crop": "zucchina", "to": 0.587, "n": 2 },
+        { "crop": "melanzana", "to": 1.0, "n": 4 }
+      ],
+      "sensori": [
+        { "sensor_id": "WH51_03", "x": 0.103 },
+        { "sensor_id": "WH51_04", "x": 0.835 }
+      ]
+    },
+    {
+      "id": 3,
+      "aree": [
+        { "crop": "zucchina", "to": 0.29, "n": 3 },
+        { "crop": "lattuga", "to": 0.463, "n": 2 },
+        { "crop": "melanzana", "to": 0.635, "n": 1 },
+        { "crop": "lattuga", "to": 1.0, "n": 4 }
+      ],
+      "sensori": []
+    }
+  ]
+}

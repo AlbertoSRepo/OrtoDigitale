@@ -11,6 +11,32 @@ export interface SensorLast {
   online: boolean;
 }
 
+/** Un'area coltura espone solo il bordo destro: il sinistro è il `to` della
+ *  precedente, e l'ultima chiude sempre a 1.0. Buchi e sovrapposizioni non sono
+ *  rappresentabili (step 12, §5.2). */
+export interface LayoutArea {
+  crop: string;
+  to: number;
+  n: number;
+}
+
+export interface LayoutSensor {
+  sensor_id: string;
+  x: number;
+}
+
+export interface LayoutRow {
+  id: number;
+  aree: LayoutArea[];
+  sensori: LayoutSensor[];
+}
+
+export interface Layout {
+  version: number;
+  updated_at: number;
+  file: LayoutRow[];
+}
+
 export interface TrendPoint {
   t: number;
   value: number;

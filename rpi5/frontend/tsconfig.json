@@ -18,5 +18,7 @@
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  "// exclude": "i test girano con `node --test` (type-stripping nativo), non nel bundle browser",
+  "exclude": ["src/**/*.test.ts"]
 }
