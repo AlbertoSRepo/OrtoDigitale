@@ -92,7 +92,7 @@ interface RowProps {
 }
 
 function Row({ row, y, m, byId, thresholds, activeSensor, onSelectSensor, onHover }: RowProps) {
-  const w = rowLength(row.id) * m.vw;
+  const w = (m.proportional ? rowLength(row.id) : 1) * m.vw;
   const bands = moistureBands(row.sensori);
 
   const readings = row.sensori
@@ -246,10 +246,11 @@ function CropStamp({
   const full = `${c.label} ${count}`;
 
   // Degradazione per larghezza resa (step 12, §7.2): componenti che cadono uno
-  // alla volta, non glifi che si affollano.
-  const showLabel = px >= 150;
-  const showCount = px >= 80;
-  if (px < 34) return null;
+  // alla volta, non glifi che si affollano. Le soglie stanno nelle metriche,
+  // così su mobile resta il solo glifo senza un ramo dedicato qui.
+  const showLabel = px >= m.labelMinPx;
+  const showCount = px >= m.countMinPx;
+  if (px < m.glyphMinPx) return null;
 
   const txt = showLabel ? full : showCount ? count : '';
   const tw = textW(txt, m.fsSmall);

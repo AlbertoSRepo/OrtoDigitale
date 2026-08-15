@@ -26,16 +26,29 @@ export interface OrtoMetrics {
   /** Lato del glifo sonda. */
   probe: number;
   fsLabel: number;
+  /** Se false tutte le file sono lunghe uguale: su schermo stretto le
+   *  proporzioni reali (0.722 / 0.790 / 1) sprecano larghezza senza dire nulla. */
+  proportional: boolean;
+  /** Larghezza minima dell'area, in unità viewBox, perché il timbro mostri
+   *  rispettivamente nome, conteggio e glifo. `Infinity` = mai. */
+  labelMinPx: number;
+  countMinPx: number;
+  glyphMinPx: number;
 }
 
 export const DESKTOP: OrtoMetrics = {
   vw: 1150, rowH: 132, gap: 22, pad: 14, labelH: 30,
   fsValue: 22, fsSmall: 13, fsLabel: 13, glyph: 44, probe: 26,
+  proportional: true,
+  labelMinPx: 150, countMinPx: 80, glyphMinPx: 34,
 };
 
+// Su mobile: file tutte uguali, e nel timbro resta il solo glifo.
 export const MOBILE: OrtoMetrics = {
   vw: 1000, rowH: 260, gap: 26, pad: 16, labelH: 46,
   fsValue: 34, fsSmall: 20, fsLabel: 20, glyph: 76, probe: 40,
+  proportional: false,
+  labelMinPx: Infinity, countMinPx: Infinity, glyphMinPx: 34,
 };
 
 export const rowTop = (m: OrtoMetrics, i: number) =>
