@@ -5,8 +5,8 @@ import { ACTIVE_SENSORS, SENSOR_LOCATIONS } from '../config/sensors';
 import { humidityColor, type Thresholds } from '../helpers/humidityColor';
 import { moistureBands } from '../helpers/moistureBands';
 import {
-  DESKTOP, MOBILE, flipOffset, glyphTop, pinY, rowLabelY, rowTop, stampY, textW, totalHeight,
-  type OrtoMetrics,
+  DESKTOP, MOBILE, clampProbe, flipOffset, glyphTop, labelX, pinY, rowLabelY, rowTop,
+  stampY, textW, totalHeight, type OrtoMetrics,
 } from '../helpers/ortoMetrics';
 import { useMediaQuery } from '../helpers/useMediaQuery';
 import { fmtRelative } from '../helpers/formatDate';
@@ -179,35 +179,49 @@ function Row({ row, y, m, byId, thresholds, activeSensor, onSelectSensor, onHove
 type PinsProps = Omit<RowProps, 'y'> & { w: number; pinY: number };
 
 function Pins({ row, w, pinY, m, byId, thresholds, activeSensor, onSelectSensor, onHover }: PinsProps) {
-  const sorted = [...row.sensori].sort((a, b) => a.x - b.x);
+  // Posizionamento prima, collisioni verticali dopo: il lato su cui finisce
+  // l'etichetta dipende dal bordo della riga, e va deciso per primo.
+  const posate = [...row.sensori]
+    .sort((a, b) => a.x - b.x)
+    .map((p) => {
+      const s = byId.get(p.sensor_id);
+      const installed = ACTIVE_SENSORS.has(p.sensor_id);
+      const value = installed && s?.value != null ? s.value : null;
+      const label = `${p.sensor_id.slice(-2)} · ${value !== null ? `${value.toFixed(0)}%` : 'n.d.'}`;
+      const warn = s?.battery_ok === false;
+      const testoW = textW(label, m.fsValue);
+      const totaleW = testoW + (warn ? m.fsValue * 0.9 : 0);
+      const cx = clampProbe(p.x * w, m.probe, w);
+      return {
+        p, s, installed, warn, label, testoW,
+        colore: value !== null && s?.online ? humidityColor(value, thresholds) : 'var(--ink-4)',
+        cx,
+        x0: labelX(cx, totaleW, w, m.probe * 0.6),
+        totaleW,
+        flip: false,
+      };
+    });
+
   let prevEnd = -Infinity;
   let flip = false;
+  for (const it of posate) {
+    flip = it.x0 < prevEnd ? !flip : false;
+    prevEnd = it.x0 + it.totaleW;
+    it.flip = flip;
+  }
 
   return (
     <>
-      {sorted.map((p) => {
-        const s = byId.get(p.sensor_id);
-        const installed = ACTIVE_SENSORS.has(p.sensor_id);
-        const value = installed && s?.value != null ? s.value : null;
-        const c = value !== null && s?.online ? humidityColor(value, thresholds) : 'var(--ink-4)';
-        const num = p.sensor_id.slice(-2);
-        const label = `${num} · ${value !== null ? `${value.toFixed(0)}%` : 'n.d.'}`;
-
-        const cx = p.x * w;
-        const start = cx + m.probe * 0.6;
-        // Sfalsa verticalmente solo se l'etichetta precedente arriverebbe addosso.
-        flip = start < prevEnd ? !flip : false;
-        prevEnd = start + textW(label, m.fsValue);
-        const cy = pinY + (flip ? flipOffset(m) : 0);
-
+      {posate.map((it) => {
+        const cy = pinY + (it.flip ? flipOffset(m) : 0);
         return (
           <g
-            key={p.sensor_id}
-            className={`orto-pin ${activeSensor === p.sensor_id ? 'active' : ''}`}
-            opacity={installed ? 1 : 0.5}
+            key={it.p.sensor_id}
+            className={`orto-pin ${activeSensor === it.p.sensor_id ? 'active' : ''}`}
+            opacity={it.installed ? 1 : 0.5}
             onMouseEnter={(e) => {
-              if (s) onHover({ sensor: s, installed, x: e.clientX, y: e.clientY });
-              onSelectSensor(p.sensor_id);
+              if (it.s) onHover({ sensor: it.s, installed: it.installed, x: e.clientX, y: e.clientY });
+              onSelectSensor(it.p.sensor_id);
             }}
             onMouseLeave={() => {
               onHover(null);
@@ -216,15 +230,20 @@ function Pins({ row, w, pinY, m, byId, thresholds, activeSensor, onSelectSensor,
           >
             <g
               className="orto-probe"
-              style={{ color: c }}
-              transform={`translate(${cx - m.probe / 2} ${cy - m.probe / 2}) scale(${m.probe / 24})`}
+              style={{ color: it.colore }}
+              transform={`translate(${it.cx - m.probe / 2} ${cy - m.probe / 2}) scale(${m.probe / 24})`}
               dangerouslySetInnerHTML={{ __html: PROBE }}
             />
-            <text className="orto-pin-label" x={start} y={cy + m.fsValue * 0.36} fontSize={m.fsValue}>
-              {label}
+            <text className="orto-pin-label" x={it.x0} y={cy + m.fsValue * 0.36} fontSize={m.fsValue}>
+              {it.label}
             </text>
-            {s?.battery_ok === false && (
-              <text className="orto-warn" x={prevEnd + 4} y={cy + m.fsValue * 0.36} fontSize={m.fsValue}>
+            {it.warn && (
+              <text
+                className="orto-warn"
+                x={it.x0 + it.testoW + 2}
+                y={cy + m.fsValue * 0.36}
+                fontSize={m.fsValue}
+              >
                 ⚠
               </text>
             )}

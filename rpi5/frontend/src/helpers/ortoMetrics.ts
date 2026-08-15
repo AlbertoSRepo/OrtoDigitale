@@ -38,7 +38,7 @@ export interface OrtoMetrics {
 
 export const DESKTOP: OrtoMetrics = {
   vw: 1150, rowH: 132, gap: 22, pad: 14, labelH: 30,
-  fsValue: 22, fsSmall: 13, fsLabel: 13, glyph: 44, probe: 26,
+  fsValue: 22, fsSmall: 13, fsLabel: 13, glyph: 52, probe: 26,
   proportional: true,
   labelMinPx: 150, countMinPx: 80, glyphMinPx: 34,
 };
@@ -46,7 +46,7 @@ export const DESKTOP: OrtoMetrics = {
 // Su mobile: file tutte uguali, e nel timbro resta il solo glifo.
 export const MOBILE: OrtoMetrics = {
   vw: 1000, rowH: 260, gap: 26, pad: 16, labelH: 46,
-  fsValue: 34, fsSmall: 20, fsLabel: 20, glyph: 76, probe: 40,
+  fsValue: 34, fsSmall: 20, fsLabel: 20, glyph: 92, probe: 40,
   proportional: false,
   labelMinPx: Infinity, countMinPx: Infinity, glyphMinPx: 34,
 };
@@ -64,7 +64,7 @@ export const rowLabelY = (m: OrtoMetrics, top: number) => top - m.labelH * 0.3;
 export const pinY = (m: OrtoMetrics, top: number) => top + m.rowH * 0.24;
 
 /** Banda inferiore: i timbri coltura (baseline del testo). */
-export const stampY = (m: OrtoMetrics, top: number) => top + m.rowH * 0.8;
+export const stampY = (m: OrtoMetrics, top: number) => top + m.rowH * 0.82;
 
 /** Di quanto scende un'etichetta pin sfalsata per non pestare la precedente. */
 export const flipOffset = (m: OrtoMetrics) => m.fsValue * 1.15;
@@ -77,3 +77,22 @@ export const glyphTop = (m: OrtoMetrics, baseline: number) => baseline - m.glyph
 /** Stima grossolana della larghezza di un testo: serve solo a decidere se una
  *  cosa ci sta, non a posizionarla. */
 export const textW = (s: string, fs: number) => s.length * fs * 0.58;
+
+/**
+ * Ascissa di partenza dell'etichetta di una sonda, garantita dentro `[0, rowW]`.
+ *
+ * Preferisce la destra della sonda; se sfora il bordo passa a sinistra; se non
+ * ci sta da nessuna delle due parti (riga strettissima) si aggrappa al bordo.
+ * L'etichetta di WH51_02, a 0.866 di una fila lunga 830 unità, sforava di 6.
+ */
+export function labelX(cx: number, labelW: number, rowW: number, gap: number): number {
+  const destra = cx + gap;
+  if (destra + labelW <= rowW) return destra;
+  const sinistra = cx - gap - labelW;
+  if (sinistra >= 0) return sinistra;
+  return Math.max(0, Math.min(destra, rowW - labelW));
+}
+
+/** Tiene il glifo sonda dentro la riga anche con x agli estremi. */
+export const clampProbe = (cx: number, probe: number, rowW: number) =>
+  Math.max(probe / 2, Math.min(cx, rowW - probe / 2));

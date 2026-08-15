@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  DESKTOP, MOBILE, flipOffset, glyphTop, labelHalf, pinY, rowLabelY, rowTop, stampY, totalHeight,
-  type OrtoMetrics,
+  DESKTOP, MOBILE, clampProbe, flipOffset, glyphTop, labelHalf, labelX, pinY, rowLabelY,
+  rowTop, stampY, textW, totalHeight, type OrtoMetrics,
 } from './ortoMetrics.ts';
 
 const METRICS: [string, OrtoMetrics][] = [['desktop', DESKTOP], ['mobile', MOBILE]];
@@ -46,5 +46,46 @@ for (const [nome, m] of METRICS) {
     const fondoSonda = pinY(m, top) + flipOffset(m) + m.probe / 2;
     assert.ok(fondoSonda < glyphTop(m, stampY(m, top)), 'sonda sfalsata addosso al timbro');
     assert.ok(pinY(m, top) - m.probe / 2 > top, 'sonda sopra il bordo alto');
+  });
+}
+
+// --- Contenimento nella riga ------------------------------------------------
+// Requisito esplicito: valore e identificativo della sonda non escono mai dalla
+// riga. Prima della correzione l'etichetta di WH51_02 (x = 0.866 su una fila
+// lunga 830 unità) sforava di 6 unità a destra.
+
+const LUNGHEZZE = [0.722, 0.790, 1.0];
+
+for (const [nome, m] of METRICS) {
+  test(`${nome}: nessuna etichetta sonda esce dalla riga, per qualunque x`, () => {
+    const etichetta = '02 · 100%';
+    const lw = textW(etichetta, m.fsValue) + m.fsValue * 0.9; // col marchio batteria
+    for (const len of LUNGHEZZE) {
+      const w = (m.proportional ? len : 1) * m.vw;
+      for (let i = 0; i <= 100; i++) {
+        const cx = clampProbe((i / 100) * w, m.probe, w);
+        const x0 = labelX(cx, lw, w, m.probe * 0.6);
+        assert.ok(x0 >= 0, `x=${i / 100} len=${len}: etichetta sfora a sinistra (${x0.toFixed(1)})`);
+        assert.ok(
+          x0 + lw <= w + 1e-9,
+          `x=${i / 100} len=${len}: etichetta sfora a destra (${(x0 + lw).toFixed(1)} > ${w.toFixed(1)})`,
+        );
+      }
+    }
+  });
+
+  test(`${nome}: il glifo sonda resta dentro la riga agli estremi`, () => {
+    const w = m.vw * 0.722;
+    for (const x of [0, 0.5, 1]) {
+      const cx = clampProbe(x * w, m.probe, w);
+      assert.ok(cx - m.probe / 2 >= -1e-9 && cx + m.probe / 2 <= w + 1e-9, `x=${x}`);
+    }
+  });
+
+  test(`${nome}: l'etichetta passa a sinistra quando a destra non ci sta`, () => {
+    const w = 400;
+    const lw = 100;
+    assert.equal(labelX(50, lw, w, 10), 60, 'con spazio a destra deve stare a destra');
+    assert.ok(labelX(395, lw, w, 10) < 395, 'vicino al bordo destro deve ribaltarsi a sinistra');
   });
 }
