@@ -10,6 +10,7 @@ import {
   stampY, textW, totalHeight, type OrtoMetrics,
 } from '../helpers/ortoMetrics';
 import { useMediaQuery } from '../helpers/useMediaQuery';
+import { OrtoOverlay } from './OrtoOverlay';
 import { fmtRelative } from '../helpers/formatDate';
 import { moveDivider, moveSensor } from '../helpers/layoutOps';
 import probeSvg from '../assets/sensor.svg?raw';
@@ -17,11 +18,6 @@ import probeSvg from '../assets/sensor.svg?raw';
 /** Il glifo sonda è vettoriale e monocromatico: si tinge col colore dell'umidità.
  *  Il wrapper <svg> va tolto una volta sola, qui. */
 const PROBE = probeSvg.replace(/^[\s\S]*?<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '');
-
-/** Cosa e' stato colpito col tasto destro: la pagina ci costruisce il menu. */
-export type Bersaglio =
-  | { tipo: 'area'; fila: number; area: number; at: number; clientX: number; clientY: number }
-  | { tipo: 'sonda'; fila: number; sensorId: string; clientX: number; clientY: number };
 
 interface Props {
   layout: Layout | undefined;
@@ -32,7 +28,6 @@ interface Props {
   /** In editor la mappa diventa interattiva; `layout` e' la bozza. */
   editing?: boolean;
   onChange?: (l: Layout) => void;
-  onContext?: (b: Bersaglio) => void;
 }
 
 interface Hover {
@@ -44,7 +39,7 @@ interface Hover {
 
 export function OrtoMap({
   layout, sensors, thresholds, activeSensor, onSelectSensor,
-  editing = false, onChange, onContext,
+  editing = false, onChange,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -98,7 +93,6 @@ export function OrtoMap({
             editing={editing}
             frazione={frazione}
             onChange={onChange}
-            onContext={onContext}
             onHover={(h) => {
               if (editing) return;   // in editor il tooltip darebbe fastidio al drag
               if (!h) return setHover(null);
@@ -109,6 +103,7 @@ export function OrtoMap({
         ))}
       </svg>
 
+      {editing && layout && onChange && <OrtoOverlay layout={layout} m={m} onChange={onChange} />}
       {hover && <SensorTooltip hover={hover} />}
     </div>
   );
@@ -126,13 +121,12 @@ interface RowProps {
   editing: boolean;
   frazione: (clientX: number, filaId: number) => number;
   onChange?: (l: Layout) => void;
-  onContext?: (b: Bersaglio) => void;
   layout?: Layout;
 }
 
 function Row({
   row, y, m, byId, thresholds, activeSensor, onSelectSensor, onHover,
-  editing, frazione, onChange, onContext, layout,
+  editing, frazione, onChange, layout,
 }: RowProps) {
   const w = (m.proportional ? rowLength(row.id) : 1) * m.vw;
   const bands = moistureBands(row.sensori);
@@ -187,22 +181,6 @@ function Row({
       {/* 3 — aree coltura: divisori + un timbro per area */}
       {aree.map((a, i) => (
         <g key={i}>
-          {editing && (
-            <rect
-              className="orto-hit-area"
-              x={a.from * w}
-              y={y}
-              width={(a.to - a.from) * w}
-              height={m.rowH}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                onContext?.({
-                  tipo: 'area', fila: row.id, area: i,
-                  at: frazione(e.clientX, row.id), clientX: e.clientX, clientY: e.clientY,
-                });
-              }}
-            />
-          )}
           {i < aree.length - 1 && (
             <line className="orto-divider" x1={a.to * w} y1={y} x2={a.to * w} y2={y + m.rowH} />
           )}
@@ -248,7 +226,6 @@ function Row({
         editing={editing}
         frazione={frazione}
         onChange={onChange}
-        onContext={onContext}
         layout={layout}
         byId={byId}
         thresholds={thresholds}
@@ -264,7 +241,7 @@ type PinsProps = Omit<RowProps, 'y'> & { w: number; pinY: number };
 
 function Pins({
   row, w, pinY, m, byId, thresholds, activeSensor, onSelectSensor, onHover,
-  editing, frazione, onChange, onContext, layout,
+  editing, frazione, onChange, layout,
 }: PinsProps) {
   // Posizionamento prima, collisioni verticali dopo: il lato su cui finisce
   // l'etichetta dipende dal bordo della riga, e va deciso per primo.
@@ -313,15 +290,6 @@ function Pins({
             onMouseLeave={() => {
               onHover(null);
               onSelectSensor(null);
-            }}
-            onContextMenu={(e) => {
-              if (!editing) return;
-              e.preventDefault();
-              e.stopPropagation();
-              onContext?.({
-                tipo: 'sonda', fila: row.id, sensorId: it.p.sensor_id,
-                clientX: e.clientX, clientY: e.clientY,
-              });
             }}
             onPointerDown={(e) => {
               if (!editing || !layout || !onChange) return;

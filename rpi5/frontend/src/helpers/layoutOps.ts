@@ -109,6 +109,75 @@ export function moveDivider(l: Layout, fila: number, i: number, to: number): Lay
   return out;
 }
 
+/** Si puo' aggiungere un'area? Serve posto sotto il tetto e un'ultima area
+ *  abbastanza larga da cedere meta' di se'. */
+export function canAddArea(row: LayoutRow): boolean {
+  if (row.aree.length >= MAX_AREE) return false;
+  const ultima = row.aree[row.aree.length - 1];
+  return ultima.to - areaFrom(row, row.aree.length - 1) >= 2 * MIN_AREA;
+}
+
+/**
+ * Aggiunge un'area in fondo a destra. Lo spazio lo cede l'ultima area, che si
+ * divide a meta': e' l'unica sorgente possibile, visto che la nuova occupa
+ * proprio il tratto finale. La nuova nasce `libero`, da cui si sceglie la
+ * coltura col menu a tendina.
+ */
+export function addArea(l: Layout, fila: number): Layout {
+  const row = l.file[idx(l, fila)];
+  if (!canAddArea(row)) return l;
+  const i = row.aree.length - 1;
+  const meta = (areaFrom(row, i) + row.aree[i].to) / 2;
+  return setCrop(splitArea(l, fila, meta), fila, i + 1, 'libero');
+}
+
+export function canRemoveArea(row: LayoutRow): boolean {
+  return row.aree.length > 1;
+}
+
+/**
+ * Elimina un'area: lo spazio va al vicino di sinistra, o a quello di destra se
+ * era la prima. A differenza di `mergeArea` sopravvive la coltura del **vicino**,
+ * non quella dell'area su cui si e' agito — qui si sta cancellando, non fondendo.
+ */
+export function removeArea(l: Layout, fila: number, i: number): Layout {
+  const out = clone(l);
+  const row = out.file[idx(out, fila)];
+  if (!canRemoveArea(row)) return l;
+  const vicino = i === 0 ? 1 : i - 1;
+  const [lo, hi] = i < vicino ? [i, vicino] : [vicino, i];
+  const tenuto = row.aree[vicino];
+  row.aree.splice(lo, 2, {
+    crop: tenuto.crop,
+    to: row.aree[hi].to,
+    n: tenuto.n,
+  });
+  return out;
+}
+
+/**
+ * Sposta un'area in un'altra posizione della stessa fila. Le larghezze restano
+ * attaccate alle aree, non alle posizioni: si permuta l'elenco e si ricalcolano
+ * i confini a cascata.
+ */
+export function reorderArea(l: Layout, fila: number, from: number, to: number): Layout {
+  const out = clone(l);
+  const row = out.file[idx(out, fila)];
+  if (from === to || from < 0 || to < 0 || from >= row.aree.length || to >= row.aree.length) return l;
+
+  const larghezze = row.aree.map((a, i) => a.to - areaFrom(row, i));
+  const ordine = row.aree.map((a, i) => ({ area: a, w: larghezze[i] }));
+  const [mosso] = ordine.splice(from, 1);
+  ordine.splice(to, 0, mosso);
+
+  let cum = 0;
+  row.aree = ordine.map((o, i) => {
+    cum = i === ordine.length - 1 ? 1 : cum + o.w;
+    return { crop: o.area.crop, to: cum, n: o.area.n };
+  });
+  return out;
+}
+
 // --- sonde ------------------------------------------------------------------
 
 export function placedSensors(l: Layout): Map<string, { fila: number; x: number }> {

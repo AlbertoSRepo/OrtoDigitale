@@ -1605,49 +1605,86 @@ button { font-family: inherit; }
 }
 
 /* maniglie: invisibili, ma con un bersaglio comodo da prendere */
-.orto-map svg.editing .orto-hit-area { fill: transparent; cursor: context-menu; }
 .orto-map svg.editing .orto-handle-div { fill: transparent; cursor: col-resize; }
 .orto-map svg.editing .orto-handle-div:hover { fill: var(--rule); fill-opacity: 0.35; }
 .orto-map svg.editing .orto-divider { stroke-width: 2; opacity: 1; }
 .orto-map svg.editing .orto-pin { cursor: grab; }
 .orto-map svg.editing .orto-pin:active { cursor: grabbing; }
 
-/* menu contestuale */
-.ctx-menu {
-  position: fixed;
-  z-index: 60;
-  background: var(--paper);
-  border: 1px solid var(--rule);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
-  padding: 5px 0;
-  max-height: 70vh;
-  overflow-y: auto;
-}
-.ctx-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 5px 12px;
-  border: 0;
-  background: none;
+/* controlli editor sovrapposti alla mappa */
+.orto-overlay { position: absolute; inset: 0; pointer-events: none; }
+.orto-overlay > div { position: absolute; inset: 0; }
+.ov-area { position: absolute; inset: 0; }
+.ov-area.dragging .ov-grip { background: var(--moss); color: var(--paper); }
+
+.ov-btn,
+.ov-crop {
+  position: absolute;
+  pointer-events: auto;
   font-family: var(--sans);
-  font-size: 13px;
+  border: 1px solid var(--rule);
+  background: var(--paper);
   color: var(--ink);
-  text-align: left;
   cursor: pointer;
 }
-.ctx-item:hover:not(:disabled) { background: var(--paper-2); }
-.ctx-item:disabled { color: var(--ink-4); cursor: default; }
-.ctx-item.danger { color: var(--terra); }
-.ctx-item.selected { font-weight: 600; }
-.ctx-item .tick { width: 8px; color: var(--moss); }
-.ctx-header {
-  padding: 7px 12px 3px;
-  font-family: var(--mono);
-  font-size: 9.5px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--ink-3);
+.ov-btn {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  font-size: 11px;
+  line-height: 1;
 }
-.ctx-sep { height: 1px; margin: 4px 0; background: var(--rule-2); }
+.ov-btn:hover:not(:disabled) { background: var(--paper-2); }
+.ov-btn:disabled { opacity: 0.35; cursor: default; }
+
+.ov-del { transform: translate(4px, 4px); }
+.ov-del:hover:not(:disabled) { background: var(--terra); color: var(--paper); border-color: var(--terra); }
+.ov-grip { transform: translate(calc(-100% - 4px), 4px); cursor: grab; }
+.ov-grip:active { cursor: grabbing; }
+
+.ov-add {
+  width: auto;
+  height: 20px;
+  padding: 0 8px;
+  transform: translate(-100%, -60%);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ov-crop {
+  transform: translate(-50%, -50%);
+  max-width: 128px;
+  padding: 2px 4px;
+  font-size: 12px;
+}
+
+.orto-sonde-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.orto-sonde-bar .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 7px;
+  border: 1px solid var(--rule);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.orto-sonde-bar .chip button {
+  border: 0;
+  background: none;
+  padding: 0 2px;
+  color: var(--ink-3);
+  font-size: 11px;
+  cursor: pointer;
+}
+.orto-sonde-bar .chip button:hover { color: var(--terra); }
+.orto-sonde-bar .ov-crop { position: static; transform: none; }

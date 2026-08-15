@@ -2,8 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  MIN_AREA, MIN_DIST, addSensor, areaFrom, canSplit, changeSensor, mergeArea, moveDivider,
-  moveSensor, placedSensors, removeSensor, setCrop, setPlantCount, splitArea, validateLayout,
+  MAX_AREE, MIN_AREA, MIN_DIST, addArea, addSensor, areaFrom, canAddArea, canRemoveArea,
+  canSplit, changeSensor, mergeArea, moveDivider, moveSensor, placedSensors, removeArea,
+  removeSensor, reorderArea, setCrop, setPlantCount, splitArea, validateLayout,
 } from './layoutOps.ts';
 import type { Layout } from '../api/types.ts';
 
@@ -180,4 +181,96 @@ test('areaFrom concatena i bordi', () => {
   const r = fila(clone(), 3);
   assert.equal(areaFrom(r, 0), 0);
   assert.equal(areaFrom(r, 2), r.aree[1].to);
+});
+
+// --- aggiunta, eliminazione, riordino (step 13, seconda stesura) ------------
+
+const larghezze = (l: Layout, id: number) =>
+  fila(l, id).aree.map((a, i) => +(a.to - areaFrom(fila(l, id), i)).toFixed(6));
+
+test('addArea: la nuova nasce ultima, libera, e la partizione regge', () => {
+  const out = addArea(clone(), 1);
+  const r = fila(out, 1);
+  assert.equal(r.aree.length, 2);
+  assert.equal(r.aree[1].crop, 'libero');
+  assert.equal(r.aree[1].n, 0);
+  assert.equal(r.aree[1].to, 1);
+  assert.deepEqual(validateLayout(out), []);
+});
+
+test('addArea prende lo spazio dall ultima area, non dalle altre', () => {
+  const prima = larghezze(clone(), 3);
+  const out = addArea(clone(), 3);
+  const dopo = larghezze(out, 3);
+  assert.deepEqual(dopo.slice(0, 3), prima.slice(0, 3), 'le prime tre non si toccano');
+  assert.ok(Math.abs(dopo[3] + dopo[4] - prima[3]) < 1e-6, 'la quarta si e divisa a meta');
+});
+
+test('addArea rifiutata al tetto di 5 aree', () => {
+  let l = clone();
+  while (canAddArea(fila(l, 1))) l = addArea(l, 1);
+  assert.equal(fila(l, 1).aree.length, MAX_AREE);
+  assert.equal(addArea(l, 1), l, 'oltre il tetto deve restituire lo stesso layout');
+});
+
+test('removeArea: lo spazio va al vicino e sopravvive la coltura del vicino', () => {
+  const out = removeArea(clone(), 3, 1);        // elimina lattuga, vicino sx = zucchina
+  const r = fila(out, 3);
+  assert.equal(r.aree.length, 3);
+  assert.equal(r.aree[0].crop, 'zucchina', 'cancellando sopravvive il vicino');
+  assert.equal(r.aree[0].n, 3, 'e le sue piante');
+  assert.equal(r.aree[0].to, 0.463);
+  assert.deepEqual(validateLayout(out), []);
+});
+
+test('removeArea sulla prima cede a destra', () => {
+  const out = removeArea(clone(), 3, 0);
+  const r = fila(out, 3);
+  assert.equal(r.aree[0].crop, 'lattuga');
+  assert.equal(r.aree[0].to, 0.463);
+  assert.deepEqual(validateLayout(out), []);
+});
+
+test('removeArea rifiutata sull ultima area rimasta', () => {
+  const l = clone();
+  assert.equal(canRemoveArea(fila(l, 1)), false);
+  assert.equal(removeArea(l, 1, 0), l);
+});
+
+test('reorder: le larghezze seguono le aree, non le posizioni', () => {
+  const prima = larghezze(clone(), 3);
+  const colture = fila(clone(), 3).aree.map((a) => a.crop);
+  const out = reorderArea(clone(), 3, 0, 2);
+  const r = fila(out, 3);
+  assert.deepEqual(r.aree.map((a) => a.crop), [colture[1], colture[2], colture[0], colture[3]]);
+  assert.deepEqual(larghezze(out, 3), [prima[1], prima[2], prima[0], prima[3]]);
+  assert.deepEqual(validateLayout(out), []);
+});
+
+test('reorder: ogni permutazione adiacente resta valida e chiude a 1', () => {
+  for (let from = 0; from < 4; from++) {
+    for (let to = 0; to < 4; to++) {
+      const out = reorderArea(clone(), 3, from, to);
+      assert.deepEqual(validateLayout(out), [], `${from} -> ${to}`);
+      assert.equal(fila(out, 3).aree[fila(out, 3).aree.length - 1].to, 1);
+    }
+  }
+});
+
+test('reorder verso se stessi o fuori range non cambia nulla', () => {
+  const l = clone();
+  assert.equal(reorderArea(l, 3, 1, 1), l);
+  assert.equal(reorderArea(l, 3, 0, 9), l);
+  assert.equal(reorderArea(l, 3, -1, 0), l);
+});
+
+test('addArea e removeArea sono inverse sul numero di aree', () => {
+  const l = clone();
+  const conta = () => fila(l, 3).aree.length;
+  const n0 = conta();
+  const su = addArea(l, 3);
+  assert.equal(fila(su, 3).aree.length, n0 + 1);
+  const giu = removeArea(su, 3, fila(su, 3).aree.length - 1);
+  assert.equal(fila(giu, 3).aree.length, n0);
+  assert.deepEqual(validateLayout(giu), []);
 });
