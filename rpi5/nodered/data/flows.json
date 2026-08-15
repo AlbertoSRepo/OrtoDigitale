@@ -76,7 +76,7 @@
         "type": "function",
         "z": "f-ecowitt",
         "name": "parse WH51 -> points + cache",
-        "func": "// Parse Ecowitt payload (form-urlencoded o JSON), genera points InfluxDB,\n// e popola global.soil_moisture_cache letto dalla decision loop.\n\nlet raw = msg.payload;\nif (typeof raw === 'string') {\n    const parsed = {};\n    for (const pair of raw.split('&')) {\n        if (!pair) continue;\n        const eq = pair.indexOf('=');\n        if (eq < 0) continue;\n        const k = decodeURIComponent(pair.slice(0, eq));\n        const v = decodeURIComponent(pair.slice(eq + 1).replace(/\\+/g, ' '));\n        parsed[k] = v;\n    }\n    raw = parsed;\n}\nif (!raw || typeof raw !== 'object') {\n    node.warn('Payload non riconosciuto, scarto');\n    return null;\n}\n\nconst CHANNELS = [1, 2, 3, 4];\nconst BATTERY_OK_THRESHOLD = 1.1;\nconst out = [];\nconst cache = global.get('soil_moisture_cache') || {};\nconst now = Date.now();\n\nfor (const ch of CHANNELS) {\n    const mRaw = raw['soilmoisture' + ch];\n    if (mRaw === undefined || mRaw === null || mRaw === '') continue;\n    const value = Number(mRaw);\n    if (!Number.isFinite(value)) continue;\n\n    const battRaw = raw['soilbatt' + ch];\n    const battery_voltage = Number(battRaw);\n    const battery_ok = Number.isFinite(battery_voltage) && battery_voltage >= BATTERY_OK_THRESHOLD;\n    const sensor_id = 'WH51_0' + ch;\n\n    out.push([\n        { value, battery_voltage: Number.isFinite(battery_voltage) ? battery_voltage : 0, battery_ok },\n        { sensor_id, aiuola: 'test', position: 'test' }\n    ]);\n\n    cache[sensor_id] = { value, ts: now, battery_ok };\n}\n\nglobal.set('soil_moisture_cache', cache);\n\nif (out.length === 0) {\n    node.warn('Nessun canale soilmoisture1..4 valido nel payload');\n    return null;\n}\n\nreturn { payload: out, measurement: 'soil_moisture' };\n",
+        "func": "// Parse Ecowitt payload (form-urlencoded o JSON), genera points InfluxDB,\n// e popola global.soil_moisture_cache letto dalla decision loop.\n\nlet raw = msg.payload;\nif (typeof raw === 'string') {\n    const parsed = {};\n    for (const pair of raw.split('&')) {\n        if (!pair) continue;\n        const eq = pair.indexOf('=');\n        if (eq < 0) continue;\n        const k = decodeURIComponent(pair.slice(0, eq));\n        const v = decodeURIComponent(pair.slice(eq + 1).replace(/\\+/g, ' '));\n        parsed[k] = v;\n    }\n    raw = parsed;\n}\nif (!raw || typeof raw !== 'object') {\n    node.warn('Payload non riconosciuto, scarto');\n    return null;\n}\n\n// --- collocazione dei sensori (step 12, §11) -------------------------------\n// La sorgente di verita' e' il layout, popolato in global da GET /api/layout.\n// ponytail: nessuna lettura di file qui. Prima della prima GET si usa il\n// fallback statico, che e' comunque la collocazione reale; se in futuro\n// servisse indipendenza dalla GET, caricare il file anche in questo nodo.\nconst FALLBACK = {\n    WH51_01: { aiuola: '1', position: 'near' },\n    WH51_02: { aiuola: '1', position: 'far'  },\n    WH51_03: { aiuola: '2', position: 'near' },\n    WH51_04: { aiuola: '2', position: 'far'  },\n    WH51_05: { aiuola: '3', position: 'near' },\n    WH51_06: { aiuola: '3', position: 'far'  }\n};\n\nfunction placement(sensor_id) {\n    const layout = global.get('orto_layout');\n    if (layout && Array.isArray(layout.file)) {\n        for (const fila of layout.file) {\n            const hit = (fila.sensori || []).find(s => s.sensor_id === sensor_id);\n            if (hit) return { aiuola: String(fila.id), position: hit.x < 0.5 ? 'near' : 'far' };\n        }\n    }\n    return FALLBACK[sensor_id] || { aiuola: 'unknown', position: 'unknown' };\n}\n\nconst CHANNELS = [1, 2, 3, 4];\nconst BATTERY_OK_THRESHOLD = 1.1;\nconst out = [];\nconst cache = global.get('soil_moisture_cache') || {};\nconst now = Date.now();\n\nfor (const ch of CHANNELS) {\n    const mRaw = raw['soilmoisture' + ch];\n    if (mRaw === undefined || mRaw === null || mRaw === '') continue;\n    const value = Number(mRaw);\n    if (!Number.isFinite(value)) continue;\n\n    const battRaw = raw['soilbatt' + ch];\n    const battery_voltage = Number(battRaw);\n    const battery_ok = Number.isFinite(battery_voltage) && battery_voltage >= BATTERY_OK_THRESHOLD;\n    const sensor_id = 'WH51_0' + ch;\n\n    out.push([\n        { value, battery_voltage: Number.isFinite(battery_voltage) ? battery_voltage : 0, battery_ok },\n        { sensor_id, ...placement(sensor_id) }\n    ]);\n\n    cache[sensor_id] = { value, ts: now, battery_ok };\n}\n\nglobal.set('soil_moisture_cache', cache);\n\nif (out.length === 0) {\n    node.warn('Nessun canale soilmoisture1..4 valido nel payload');\n    return null;\n}\n\nreturn { payload: out, measurement: 'soil_moisture' };\n",
         "outputs": 1,
         "timeout": "",
         "noerr": 0,
@@ -344,8 +344,13 @@
         "z": "f-valve",
         "name": "tick 60s (flow poll)",
         "props": [
-            { "p": "payload" },
-            { "p": "topic", "vt": "str" }
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
         ],
         "repeat": "60",
         "crontab": "",
@@ -1224,7 +1229,11 @@
         "swaggerDoc": "",
         "x": 180,
         "y": 100,
-        "wires": [["ar-fn-q-sensors-last"]]
+        "wires": [
+            [
+                "ar-fn-q-sensors-last"
+            ]
+        ]
     },
     {
         "id": "ar-fn-q-sensors-last",
@@ -1240,7 +1249,11 @@
         "libs": [],
         "x": 400,
         "y": 100,
-        "wires": [["ar-influx-q-sensors-last"]]
+        "wires": [
+            [
+                "ar-influx-q-sensors-last"
+            ]
+        ]
     },
     {
         "id": "ar-influx-q-sensors-last",
@@ -1255,14 +1268,18 @@
         "org": "orto-digitale",
         "x": 620,
         "y": 100,
-        "wires": [["ar-fn-fmt-sensors-last"]]
+        "wires": [
+            [
+                "ar-fn-fmt-sensors-last"
+            ]
+        ]
     },
     {
         "id": "ar-fn-fmt-sensors-last",
         "type": "function",
         "z": "f-api-readers",
         "name": "format response",
-        "func": "const rows = Array.isArray(msg.payload) ? msg.payload : (msg.payload && msg.payload[0] ? msg.payload[0] : []);\nconst flat = [];\n(Array.isArray(rows) ? rows : [rows]).forEach(r => {\n    if (Array.isArray(r)) r.forEach(x => flat.push(x));\n    else if (r && typeof r === 'object') flat.push(r);\n});\nconst now = Date.now();\nconst SENSOR_IDS = ['WH51_01','WH51_02','WH51_03','WH51_04','WH51_05','WH51_06'];\nconst result = SENSOR_IDS.map(id => {\n    const r = flat.find(x => x && x.sensor_id === id);\n    if (!r) return { sensor_id: id, aiuola: null, position: null, value: null, timestamp: null, battery_ok: null, rssi: null, online: false };\n    const t = r._time ? new Date(r._time).getTime() : null;\n    return {\n        sensor_id: id,\n        aiuola: r.aiuola || null,\n        position: r.position || null,\n        value: Number.isFinite(r.value) ? Number(r.value) : null,\n        timestamp: t,\n        battery_ok: typeof r.battery_ok === 'boolean' ? r.battery_ok : (Number(r.battery_voltage) > 1.5),\n        rssi: Number.isFinite(r.rssi) ? Number(r.rssi) : null,\n        online: t ? (now - t) < 30 * 60 * 1000 : false\n    };\n});\nmsg.statusCode = 200;\nmsg.headers = { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' };\nmsg.payload = result;\nreturn msg;\n",
+        "func": "const rows = Array.isArray(msg.payload) ? msg.payload : (msg.payload && msg.payload[0] ? msg.payload[0] : []);\nconst flat = [];\n(Array.isArray(rows) ? rows : [rows]).forEach(r => {\n    if (Array.isArray(r)) r.forEach(x => flat.push(x));\n    else if (r && typeof r === 'object') flat.push(r);\n});\nconst now = Date.now();\n// I punti scritti prima dello step 12 hanno i tag letterali 'test'.\n// Normalizzati qui, dove passano tutti i chiamanti, cosi' il fallback\n// client-side (?? SENSOR_LOCATIONS) torna a funzionare.\nconst clean = v => (v === null || v === undefined || v === '' || v === 'test') ? null : v;\nconst SENSOR_IDS = ['WH51_01','WH51_02','WH51_03','WH51_04','WH51_05','WH51_06'];\nconst result = SENSOR_IDS.map(id => {\n    const r = flat.find(x => x && x.sensor_id === id);\n    if (!r) return { sensor_id: id, aiuola: null, position: null, value: null, timestamp: null, battery_ok: null, rssi: null, online: false };\n    const t = r._time ? new Date(r._time).getTime() : null;\n    return {\n        sensor_id: id,\n        aiuola: clean(r.aiuola),\n        position: clean(r.position),\n        value: Number.isFinite(r.value) ? Number(r.value) : null,\n        timestamp: t,\n        battery_ok: typeof r.battery_ok === 'boolean' ? r.battery_ok : (Number(r.battery_voltage) > 1.5),\n        rssi: Number.isFinite(r.rssi) ? Number(r.rssi) : null,\n        online: t ? (now - t) < 30 * 60 * 1000 : false\n    };\n});\nmsg.statusCode = 200;\nmsg.headers = { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' };\nmsg.payload = result;\nreturn msg;\n",
         "outputs": 1,
         "timeout": "",
         "noerr": 0,
@@ -1271,7 +1288,11 @@
         "libs": [],
         "x": 840,
         "y": 100,
-        "wires": [["ar-http-resp-sensors-last"]]
+        "wires": [
+            [
+                "ar-http-resp-sensors-last"
+            ]
+        ]
     },
     {
         "id": "ar-http-resp-sensors-last",
@@ -1295,7 +1316,11 @@
         "swaggerDoc": "",
         "x": 180,
         "y": 200,
-        "wires": [["ar-fn-q-sensors-trend"]]
+        "wires": [
+            [
+                "ar-fn-q-sensors-trend"
+            ]
+        ]
     },
     {
         "id": "ar-fn-q-sensors-trend",
@@ -1311,7 +1336,11 @@
         "libs": [],
         "x": 400,
         "y": 200,
-        "wires": [["ar-influx-q-sensors-trend"]]
+        "wires": [
+            [
+                "ar-influx-q-sensors-trend"
+            ]
+        ]
     },
     {
         "id": "ar-influx-q-sensors-trend",
@@ -1326,7 +1355,11 @@
         "org": "orto-digitale",
         "x": 620,
         "y": 200,
-        "wires": [["ar-fn-fmt-sensors-trend"]]
+        "wires": [
+            [
+                "ar-fn-fmt-sensors-trend"
+            ]
+        ]
     },
     {
         "id": "ar-fn-fmt-sensors-trend",
@@ -1342,7 +1375,11 @@
         "libs": [],
         "x": 840,
         "y": 200,
-        "wires": [["ar-http-resp-sensors-trend"]]
+        "wires": [
+            [
+                "ar-http-resp-sensors-trend"
+            ]
+        ]
     },
     {
         "id": "ar-http-resp-sensors-trend",
@@ -1366,7 +1403,11 @@
         "swaggerDoc": "",
         "x": 180,
         "y": 300,
-        "wires": [["ar-fn-q-valve-intervals"]]
+        "wires": [
+            [
+                "ar-fn-q-valve-intervals"
+            ]
+        ]
     },
     {
         "id": "ar-fn-q-valve-intervals",
@@ -1382,7 +1423,11 @@
         "libs": [],
         "x": 400,
         "y": 300,
-        "wires": [["ar-influx-q-valve-intervals"]]
+        "wires": [
+            [
+                "ar-influx-q-valve-intervals"
+            ]
+        ]
     },
     {
         "id": "ar-influx-q-valve-intervals",
@@ -1397,7 +1442,11 @@
         "org": "orto-digitale",
         "x": 620,
         "y": 300,
-        "wires": [["ar-fn-fmt-valve-intervals"]]
+        "wires": [
+            [
+                "ar-fn-fmt-valve-intervals"
+            ]
+        ]
     },
     {
         "id": "ar-fn-fmt-valve-intervals",
@@ -1413,7 +1462,11 @@
         "libs": [],
         "x": 840,
         "y": 300,
-        "wires": [["ar-http-resp-valve-intervals"]]
+        "wires": [
+            [
+                "ar-http-resp-valve-intervals"
+            ]
+        ]
     },
     {
         "id": "ar-http-resp-valve-intervals",
@@ -1437,7 +1490,11 @@
         "swaggerDoc": "",
         "x": 180,
         "y": 400,
-        "wires": [["ar-fn-q-valve-cumulative"]]
+        "wires": [
+            [
+                "ar-fn-q-valve-cumulative"
+            ]
+        ]
     },
     {
         "id": "ar-fn-q-valve-cumulative",
@@ -1453,7 +1510,11 @@
         "libs": [],
         "x": 400,
         "y": 400,
-        "wires": [["ar-influx-q-valve-cumulative"]]
+        "wires": [
+            [
+                "ar-influx-q-valve-cumulative"
+            ]
+        ]
     },
     {
         "id": "ar-influx-q-valve-cumulative",
@@ -1468,7 +1529,11 @@
         "org": "orto-digitale",
         "x": 620,
         "y": 400,
-        "wires": [["ar-fn-fmt-valve-cumulative"]]
+        "wires": [
+            [
+                "ar-fn-fmt-valve-cumulative"
+            ]
+        ]
     },
     {
         "id": "ar-fn-fmt-valve-cumulative",
@@ -1484,7 +1549,11 @@
         "libs": [],
         "x": 840,
         "y": 400,
-        "wires": [["ar-http-resp-valve-cumulative"]]
+        "wires": [
+            [
+                "ar-http-resp-valve-cumulative"
+            ]
+        ]
     },
     {
         "id": "ar-http-resp-valve-cumulative",
@@ -1508,7 +1577,11 @@
         "swaggerDoc": "",
         "x": 180,
         "y": 500,
-        "wires": [["ar-fn-q-weather-now"]]
+        "wires": [
+            [
+                "ar-fn-q-weather-now"
+            ]
+        ]
     },
     {
         "id": "ar-fn-q-weather-now",
@@ -1524,7 +1597,11 @@
         "libs": [],
         "x": 400,
         "y": 500,
-        "wires": [["ar-influx-q-weather-now"]]
+        "wires": [
+            [
+                "ar-influx-q-weather-now"
+            ]
+        ]
     },
     {
         "id": "ar-influx-q-weather-now",
@@ -1539,7 +1616,11 @@
         "org": "orto-digitale",
         "x": 620,
         "y": 500,
-        "wires": [["ar-fn-fmt-weather-now"]]
+        "wires": [
+            [
+                "ar-fn-fmt-weather-now"
+            ]
+        ]
     },
     {
         "id": "ar-fn-fmt-weather-now",
@@ -1555,7 +1636,11 @@
         "libs": [],
         "x": 840,
         "y": 500,
-        "wires": [["ar-http-resp-weather-now"]]
+        "wires": [
+            [
+                "ar-http-resp-weather-now"
+            ]
+        ]
     },
     {
         "id": "ar-http-resp-weather-now",
@@ -1579,7 +1664,11 @@
         "swaggerDoc": "",
         "x": 180,
         "y": 600,
-        "wires": [["ar-fn-q-weather-forecast"]]
+        "wires": [
+            [
+                "ar-fn-q-weather-forecast"
+            ]
+        ]
     },
     {
         "id": "ar-fn-q-weather-forecast",
@@ -1595,7 +1684,11 @@
         "libs": [],
         "x": 420,
         "y": 600,
-        "wires": [["ar-http-req-weather-forecast"]]
+        "wires": [
+            [
+                "ar-http-req-weather-forecast"
+            ]
+        ]
     },
     {
         "id": "ar-http-req-weather-forecast",
@@ -1615,7 +1708,11 @@
         "headers": [],
         "x": 660,
         "y": 600,
-        "wires": [["ar-fn-fmt-weather-forecast"]]
+        "wires": [
+            [
+                "ar-fn-fmt-weather-forecast"
+            ]
+        ]
     },
     {
         "id": "ar-fn-fmt-weather-forecast",
@@ -1631,7 +1728,11 @@
         "libs": [],
         "x": 900,
         "y": 600,
-        "wires": [["ar-http-resp-weather-forecast"]]
+        "wires": [
+            [
+                "ar-http-resp-weather-forecast"
+            ]
+        ]
     },
     {
         "id": "ar-http-resp-weather-forecast",
@@ -1663,7 +1764,11 @@
         "swaggerDoc": "",
         "x": 180,
         "y": 100,
-        "wires": [["sy-fn-health"]]
+        "wires": [
+            [
+                "sy-fn-health"
+            ]
+        ]
     },
     {
         "id": "sy-fn-health",
@@ -1679,7 +1784,11 @@
         "libs": [],
         "x": 440,
         "y": 100,
-        "wires": [["sy-http-resp-health"]]
+        "wires": [
+            [
+                "sy-http-resp-health"
+            ]
+        ]
     },
     {
         "id": "sy-http-resp-health",
@@ -1703,7 +1812,11 @@
         "swaggerDoc": "",
         "x": 180,
         "y": 160,
-        "wires": [["sy-fn-stats"]]
+        "wires": [
+            [
+                "sy-fn-stats"
+            ]
+        ]
     },
     {
         "id": "sy-fn-stats",
@@ -1716,10 +1829,19 @@
         "noerr": 0,
         "initialize": "",
         "finalize": "",
-        "libs": [{"var": "fs", "module": "fs"}],
+        "libs": [
+            {
+                "var": "fs",
+                "module": "fs"
+            }
+        ],
         "x": 440,
         "y": 160,
-        "wires": [["sy-http-resp-stats"]]
+        "wires": [
+            [
+                "sy-http-resp-stats"
+            ]
+        ]
     },
     {
         "id": "sy-http-resp-stats",
@@ -1743,7 +1865,11 @@
         "swaggerDoc": "",
         "x": 180,
         "y": 220,
-        "wires": [["sy-fn-validate-shutdown"]]
+        "wires": [
+            [
+                "sy-fn-validate-shutdown"
+            ]
+        ]
     },
     {
         "id": "sy-fn-validate-shutdown",
@@ -1759,7 +1885,14 @@
         "libs": [],
         "x": 440,
         "y": 220,
-        "wires": [["sy-file-shutdown-flag"], ["sy-http-resp-shutdown"]]
+        "wires": [
+            [
+                "sy-file-shutdown-flag"
+            ],
+            [
+                "sy-http-resp-shutdown"
+            ]
+        ]
     },
     {
         "id": "sy-file-shutdown-flag",
@@ -1774,7 +1907,11 @@
         "encoding": "none",
         "x": 800,
         "y": 220,
-        "wires": [["sy-fn-shutdown-ack"]]
+        "wires": [
+            [
+                "sy-fn-shutdown-ack"
+            ]
+        ]
     },
     {
         "id": "sy-fn-shutdown-ack",
@@ -1790,7 +1927,11 @@
         "libs": [],
         "x": 1100,
         "y": 220,
-        "wires": [["sy-http-resp-shutdown"]]
+        "wires": [
+            [
+                "sy-http-resp-shutdown"
+            ]
+        ]
     },
     {
         "id": "sy-http-resp-shutdown",
@@ -1814,7 +1955,11 @@
         "swaggerDoc": "",
         "x": 180,
         "y": 340,
-        "wires": [["sy-fn-cancel-prep"]]
+        "wires": [
+            [
+                "sy-fn-cancel-prep"
+            ]
+        ]
     },
     {
         "id": "sy-fn-cancel-prep",
@@ -1830,7 +1975,11 @@
         "libs": [],
         "x": 440,
         "y": 340,
-        "wires": [["sy-file-cancel-flag"]]
+        "wires": [
+            [
+                "sy-file-cancel-flag"
+            ]
+        ]
     },
     {
         "id": "sy-file-cancel-flag",
@@ -1845,7 +1994,11 @@
         "encoding": "none",
         "x": 800,
         "y": 340,
-        "wires": [["sy-fn-cancel-ack"]]
+        "wires": [
+            [
+                "sy-fn-cancel-ack"
+            ]
+        ]
     },
     {
         "id": "sy-fn-cancel-ack",
@@ -1861,7 +2014,11 @@
         "libs": [],
         "x": 1100,
         "y": 340,
-        "wires": [["sy-http-resp-shutdown-cancel"]]
+        "wires": [
+            [
+                "sy-http-resp-shutdown-cancel"
+            ]
+        ]
     },
     {
         "id": "sy-http-resp-shutdown-cancel",
@@ -1893,7 +2050,11 @@
         "swaggerDoc": "",
         "x": 180,
         "y": 100,
-        "wires": [["wf-fn-handle"]]
+        "wires": [
+            [
+                "wf-fn-handle"
+            ]
+        ]
     },
     {
         "id": "wf-http-in-forecast",
@@ -1906,7 +2067,11 @@
         "swaggerDoc": "",
         "x": 200,
         "y": 200,
-        "wires": [["wf-fn-handle"]]
+        "wires": [
+            [
+                "wf-fn-handle"
+            ]
+        ]
     },
     {
         "id": "wf-fn-handle",
@@ -1919,10 +2084,19 @@
         "noerr": 0,
         "initialize": "",
         "finalize": "",
-        "libs": [{"var": "https", "module": "https"}],
+        "libs": [
+            {
+                "var": "https",
+                "module": "https"
+            }
+        ],
         "x": 480,
         "y": 150,
-        "wires": [["wf-http-response"]]
+        "wires": [
+            [
+                "wf-http-response"
+            ]
+        ]
     },
     {
         "id": "wf-http-response",
@@ -1933,6 +2107,59 @@
         "headers": {},
         "x": 760,
         "y": 150,
+        "wires": []
+    },
+    {
+        "id": "ol-http-in-layout",
+        "type": "http in",
+        "z": "f-api-readers",
+        "name": "GET /api/layout",
+        "url": "/api/layout",
+        "method": "get",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 180,
+        "y": 520,
+        "wires": [
+            [
+                "ol-fn-layout"
+            ]
+        ]
+    },
+    {
+        "id": "ol-fn-layout",
+        "type": "function",
+        "z": "f-api-readers",
+        "name": "read layout + validate",
+        "func": "// GET /api/layout — step 12, §10.1\n// Legge /data/orto_layout.json; se manca o non supera le invarianti di §5.3\n// ricade sul seed committato. Popola anche global.orto_layout, da cui il\n// parser WH51 deriva i tag aiuola/position.\nconst LIVE = '/data/orto_layout.json';\nconst SEED = '/data/orto_layout.seed.json';\n\nfunction valid(d) {\n    if (!d || !Array.isArray(d.file) || d.file.length !== 3) return false;\n    if (d.file.map(r => r.id).sort().join() !== '1,2,3') return false;\n    for (const fila of d.file) {\n        const a = fila.aree;\n        if (!Array.isArray(a) || a.length < 1 || a.length > 5) return false;\n        let prev = 0;\n        for (const area of a) {\n            if (!(area.to > prev) || area.to - prev < 0.05 || area.to > 1) return false;\n            prev = area.to;\n        }\n        if (Math.abs(prev - 1) > 1e-6) return false;\n        if (!Array.isArray(fila.sensori)) return false;\n        if (fila.sensori.some(s => !(s.x >= 0 && s.x <= 1))) return false;\n    }\n    const ids = d.file.flatMap(r => r.sensori.map(s => s.sensor_id));\n    return new Set(ids).size === ids.length;\n}\n\nasync function load(path) {\n    try { return JSON.parse(await fs.promises.readFile(path, 'utf8')); }\n    catch (e) { return null; }\n}\n\nlet doc = await load(LIVE);\nif (!valid(doc)) {\n    if (doc) node.warn('orto_layout.json non valido, uso il seed');\n    doc = await load(SEED);\n}\nif (!valid(doc)) {\n    node.error('nessun layout utilizzabile: ne LIVE ne SEED');\n    msg.statusCode = 500;\n    msg.headers = { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' };\n    msg.payload = { ok: false, error: 'layout non disponibile' };\n    return msg;\n}\n\nglobal.set('orto_layout', doc);\nmsg.statusCode = 200;\nmsg.headers = { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' };\nmsg.payload = doc;\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [
+            {
+                "var": "fs",
+                "module": "fs"
+            }
+        ],
+        "x": 460,
+        "y": 520,
+        "wires": [
+            [
+                "ol-http-resp-layout"
+            ]
+        ]
+    },
+    {
+        "id": "ol-http-resp-layout",
+        "type": "http response",
+        "z": "f-api-readers",
+        "name": "resp",
+        "statusCode": "",
+        "headers": {},
+        "x": 720,
+        "y": 520,
         "wires": []
     }
 ]
