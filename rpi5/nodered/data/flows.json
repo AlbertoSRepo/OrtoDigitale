@@ -2161,5 +2161,101 @@
         "x": 720,
         "y": 520,
         "wires": []
+    },
+    {
+        "id": "ol-http-in-put",
+        "type": "http in",
+        "z": "f-api-readers",
+        "name": "PUT /api/layout",
+        "url": "/api/layout",
+        "method": "put",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 180,
+        "y": 580,
+        "wires": [
+            [
+                "ol-fn-put"
+            ]
+        ]
+    },
+    {
+        "id": "ol-fn-put",
+        "type": "function",
+        "z": "f-api-readers",
+        "name": "validate + save + diff",
+        "func": "// PUT /api/layout — step 13, §6\n// Valida, salva in modo atomico, e in coda emette i punti sensor_moves.\n// Uscita 1 = risposta HTTP. Uscita 2 = scrittura su InfluxDB (best-effort).\nconst LIVE = '/data/orto_layout.json';\nconst BAK = '/data/orto_layout.json.bak';\nconst TMP = '/data/orto_layout.json.tmp';\n\n// Deve combaciare con src/config/orto.ts (CROPS). Duplicazione voluta: e' un\n// confine di fiducia, il server non puo' fidarsi dell'elenco del client.\nconst CROPS = ['libero', 'pomodoro', 'zucchina', 'melanzana', 'lattuga'];\n// Namespace fisico dei sensori. Quali siano *installati* lo decide il frontend\n// (ACTIVE_SENSORS): qui si rifiuta solo cio' che non e' un WH51.\nconst SENSORI = ['WH51_01', 'WH51_02', 'WH51_03', 'WH51_04', 'WH51_05', 'WH51_06'];\nconst MIN_AREA = 0.05;\nconst MIN_DIST = 0.03;\n\nfunction validate(d) {\n    const e = [];\n    const add = (path, code, message) => e.push({ path: path, code: code, message: message });\n\n    if (!d || !Array.isArray(d.file) || d.file.length !== 3 ||\n        d.file.map(r => r && r.id).sort().join() !== '1,2,3') {\n        add('file', 'bad_file_set', 'servono esattamente 3 file con id 1, 2, 3');\n        return e;\n    }\n\n    const visti = {};\n    d.file.forEach((fila, i) => {\n        const aree = fila.aree;\n        if (!Array.isArray(aree) || aree.length < 1 || aree.length > 5) {\n            add('file[' + i + '].aree', 'too_many_areas', 'una fila ha da 1 a 5 aree');\n        } else {\n            let prev = 0;\n            aree.forEach((a, j) => {\n                const p = 'file[' + i + '].aree[' + j + ']';\n                if (!(a.to > prev)) {\n                    add(p + '.to', 'not_increasing', 'to deve essere strettamente crescente');\n                } else if (a.to - prev < MIN_AREA - 1e-9) {\n                    add(p + '.to', 'area_too_narrow', 'area piu stretta di ' + MIN_AREA);\n                }\n                if (CROPS.indexOf(a.crop) < 0) {\n                    add(p + '.crop', 'unknown_crop', 'coltura sconosciuta: ' + a.crop);\n                }\n                if (!Number.isInteger(a.n) || a.n < 0 || a.n > 20 || (a.crop === 'libero' && a.n !== 0)) {\n                    add(p + '.n', 'bad_plant_count', 'n intero fra 0 e 20, e 0 per libero');\n                }\n                prev = a.to;\n            });\n            if (Math.abs(prev - 1) > 1e-6) {\n                add('file[' + i + '].aree[' + (aree.length - 1) + '].to', 'not_closed',\n                    'ultima area deve chiudere a 1.0');\n            }\n        }\n\n        if (!Array.isArray(fila.sensori)) {\n            add('file[' + i + '].sensori', 'bad_file_set', 'sensori deve essere un array');\n            return;\n        }\n        const xs = [];\n        fila.sensori.forEach((s, j) => {\n            const p = 'file[' + i + '].sensori[' + j + ']';\n            if (SENSORI.indexOf(s.sensor_id) < 0) {\n                add(p + '.sensor_id', 'unknown_sensor', 'sensore sconosciuto: ' + s.sensor_id);\n            } else if (visti[s.sensor_id]) {\n                add(p + '.sensor_id', 'duplicate_sensor',\n                    s.sensor_id + ' gia piazzato in fila ' + visti[s.sensor_id]);\n            } else {\n                visti[s.sensor_id] = fila.id;\n            }\n            if (typeof s.x !== 'number' || !(s.x >= 0 && s.x <= 1)) {\n                add(p + '.x', 'x_out_of_range', 'x deve stare fra 0 e 1');\n            } else {\n                xs.push({ x: s.x, j: j });\n            }\n        });\n        xs.sort((u, v) => u.x - v.x);\n        for (let k = 1; k < xs.length; k++) {\n            if (xs[k].x - xs[k - 1].x < MIN_DIST - 1e-9) {\n                add('file[' + i + '].sensori[' + xs[k].j + '].x', 'sensor_too_close',\n                    'sonde a meno di ' + MIN_DIST + ' una dall altra');\n            }\n        }\n    });\n    return e;\n}\n\nfunction indicizza(doc) {\n    const m = {};\n    if (doc && Array.isArray(doc.file)) {\n        for (const fila of doc.file) {\n            for (const s of (fila.sensori || [])) m[s.sensor_id] = { aiuola: fila.id, x: s.x };\n        }\n    }\n    return m;\n}\n\nfunction rispondi(status, payload) {\n    msg.statusCode = status;\n    msg.headers = { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' };\n    msg.payload = payload;\n}\n\nconst errors = validate(msg.payload);\nif (errors.length) {\n    rispondi(400, { ok: false, errors: errors });\n    return [msg, null];\n}\n\nlet prev = null;\ntry { prev = JSON.parse(await fs.promises.readFile(LIVE, 'utf8')); } catch (err) { prev = null; }\n\nconst salvato = {\n    version: 1,\n    updated_at: Math.floor(Date.now() / 1000),\n    file: msg.payload.file\n};\n\nif (prev) {\n    try { await fs.promises.writeFile(BAK, JSON.stringify(prev, null, 2)); }\n    catch (err) { node.warn('backup del layout fallito: ' + err.message); }\n}\n\n// Atomica: scrivo su temporaneo e rinomino, cosi' un crash a meta' non lascia\n// un JSON troncato al posto del layout.\nawait fs.promises.writeFile(TMP, JSON.stringify(salvato, null, 2));\nawait fs.promises.rename(TMP, LIVE);\n\nglobal.set('orto_layout', salvato);\nrispondi(200, salvato);\n\n// --- diff degli spostamenti sonda (step 13, §8) --------------------------\nconst a = indicizza(prev);\nconst b = indicizza(salvato);\nconst ids = Object.keys(Object.assign({}, a, b));\nconst righe = [];\nconst ns = Date.now() * 1000000;\n\nfor (const id of ids) {\n    const p = a[id];\n    const q = b[id];\n    let action = null;\n    if (!p && q) action = 'place';\n    else if (p && !q) action = 'remove';\n    else if (p.aiuola !== q.aiuola) action = 'reassign';\n    else if (Math.abs(p.x - q.x) >= 0.005) action = 'move';\n    if (!action) continue;   // sotto 0.005 e' rumore di arrotondamento\n\n    const campi = [\n        'from_aiuola=' + (p ? p.aiuola : -1) + 'i',\n        'to_aiuola=' + (q ? q.aiuola : -1) + 'i',\n        'from_x=' + (p ? p.x : -1),\n        'to_x=' + (q ? q.x : -1),\n        'changed_aiuola=' + (action === 'reassign')\n    ].join(',');\n    righe.push('sensor_moves,sensor_id=' + id + ',action=' + action + ' ' + campi + ' ' + ns);\n}\n\nif (righe.length === 0) return [msg, null];\n\n// Il token sta in .env e arriva come variabile d'ambiente: NON e' una\n// credenziale Node-RED, quindi nessun redeploy di flows.json puo' cancellarlo.\nconst token = env.get('INFLUX_TOKEN_NODERED_EVENTS_RW');\nif (!token) {\n    node.warn('INFLUX_TOKEN_NODERED_EVENTS_RW assente: ' + righe.length + ' sensor_moves non registrati');\n    return [msg, null];\n}\n\nreturn [msg, {\n    method: 'POST',\n    url: 'http://influxdb:8086/api/v2/write?org=orto-digitale&bucket=events&precision=ns',\n    headers: { Authorization: 'Token ' + token, 'Content-Type': 'text/plain; charset=utf-8' },\n    payload: righe.join('\\n')\n}];\n",
+        "outputs": 2,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [
+            {
+                "var": "fs",
+                "module": "fs"
+            }
+        ],
+        "x": 460,
+        "y": 580,
+        "wires": [
+            [
+                "ol-http-resp-put"
+            ],
+            [
+                "ol-req-events"
+            ]
+        ]
+    },
+    {
+        "id": "ol-http-resp-put",
+        "type": "http response",
+        "z": "f-api-readers",
+        "name": "resp",
+        "statusCode": "",
+        "headers": {},
+        "x": 720,
+        "y": 560,
+        "wires": []
+    },
+    {
+        "id": "ol-req-events",
+        "type": "http request",
+        "z": "f-api-readers",
+        "name": "write events/sensor_moves",
+        "method": "use",
+        "ret": "txt",
+        "paytoqs": "ignore",
+        "url": "",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": true,
+        "headers": [],
+        "x": 760,
+        "y": 620,
+        "wires": [
+            [
+                "ol-fn-events-log"
+            ]
+        ]
+    },
+    {
+        "id": "ol-fn-events-log",
+        "type": "function",
+        "z": "f-api-readers",
+        "name": "log esito history",
+        "func": "// La history e' best-effort: se la scrittura fallisce il layout resta salvato.\nconst code = msg.statusCode;\nif (code >= 200 && code < 300) {\n    node.log('sensor_moves registrati su bucket events');\n} else {\n    node.warn('scrittura sensor_moves fallita (HTTP ' + code + '): ' +\n        String(msg.payload).slice(0, 200));\n}\nreturn null;\n",
+        "outputs": 0,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1020,
+        "y": 620,
+        "wires": []
     }
 ]
