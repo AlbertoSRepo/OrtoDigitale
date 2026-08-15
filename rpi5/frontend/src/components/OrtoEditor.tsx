@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { putLayout } from '../api/layout';
 import type { Layout } from '../api/types';
-import { ACTIVE_SENSORS, SENSOR_LOCATIONS } from '../config/sensors';
-import { addSensor, placedSensors, removeSensor, validateLayout } from '../helpers/layoutOps';
+import { SENSOR_LOCATIONS } from '../config/sensors';
+import { placedSensors, removeSensor, validateLayout } from '../helpers/layoutOps';
 import { useMediaQuery } from '../helpers/useMediaQuery';
 import { OrtoMap } from './OrtoMap';
 
@@ -35,11 +35,6 @@ export function OrtoEditor({ layout, sensors, thresholds, activeSensor, onSelect
   const errori = useMemo(() => (draft ? validateLayout(draft) : []), [draft]);
 
   const piazzate = useMemo(() => (draft ? placedSensors(draft) : new Map()), [draft]);
-  const libere = useMemo(
-    () => [...ACTIVE_SENSORS].filter((id) => !piazzate.has(id)).sort(),
-    [piazzate],
-  );
-
   // Se una sonda finisce in una fila diversa dalla sua aiuola di targa, le
   // nuove letture verranno registrate con la fila nuova (step 13, §9).
   const riassegnate = useMemo(
@@ -138,21 +133,6 @@ export function OrtoEditor({ layout, sensors, thresholds, activeSensor, onSelect
               </button>
             </span>
           ))}
-          {libere.length > 0 && (
-            <select
-              className="ov-crop"
-              value=""
-              onChange={(e) => {
-                const id = e.target.value;
-                if (id) setDraft(addSensor(draft, SENSOR_LOCATIONS[id]?.aiuola ?? 1, id, 0.5));
-              }}
-            >
-              <option value="">+ aggiungi sonda…</option>
-              {libere.map((id) => (
-                <option key={id} value={id}>{id}</option>
-              ))}
-            </select>
-          )}
         </div>
       )}
 

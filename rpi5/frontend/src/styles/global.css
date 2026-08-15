@@ -1644,15 +1644,31 @@ button { font-family: inherit; }
 .ov-grip { transform: translate(calc(-100% - 4px), 4px); cursor: grab; }
 .ov-grip:active { cursor: grabbing; }
 
+/* barretta dei comandi di fila, ancorata al bordo destro sopra la riga */
+.ov-rowbar {
+  position: absolute;
+  display: flex;
+  gap: 4px;
+  transform: translate(-100%, -60%);
+  pointer-events: auto;
+}
+.ov-rowbar .ov-btn { position: static; transform: none; }
+
 .ov-add {
   width: auto;
   height: 20px;
   padding: 0 8px;
-  transform: translate(-100%, -60%);
   font-family: var(--mono);
   font-size: 10px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+}
+/* la tendina sonda deve leggersi come il bottone accanto */
+.ov-add-sonda {
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 0 8px;
+  text-align: center;
 }
 
 .ov-crop {

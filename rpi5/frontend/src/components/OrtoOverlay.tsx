@@ -1,8 +1,10 @@
 import { useRef, useState } from 'react';
 import type { Layout } from '../api/types';
 import { CROPS, rowLength } from '../config/orto';
+import { ACTIVE_SENSORS } from '../config/sensors';
 import {
-  addArea, areaFrom, canAddArea, canRemoveArea, removeArea, reorderArea, setCrop,
+  addArea, addSensor, areaFrom, canAddArea, canRemoveArea, placedSensors, removeArea,
+  reorderArea, setCrop,
 } from '../helpers/layoutOps';
 import { rowLabelY, rowTop, totalHeight, type OrtoMetrics } from '../helpers/ortoMetrics';
 
@@ -28,6 +30,8 @@ export function OrtoOverlay({ layout, m, onChange }: Props) {
   const [trascinata, setTrascinata] = useState<{ fila: number; i: number } | null>(null);
 
   const totalH = totalHeight(m, layout.file.length);
+  const piazzate = placedSensors(layout);
+  const libere = [...ACTIVE_SENSORS].filter((id) => !piazzate.has(id)).sort();
   const pctX = (vbX: number) => ((vbX + m.pad) / (m.vw + m.pad * 2)) * 100;
   const pctY = (vbY: number) => (vbY / totalH) * 100;
 
@@ -46,16 +50,40 @@ export function OrtoOverlay({ layout, m, onChange }: Props) {
 
         return (
           <div key={row.id}>
-            <button
-              type="button"
-              className="ov-btn ov-add"
+            <div
+              className="ov-rowbar"
               style={{ left: `${pctX(w)}%`, top: `${pctY(rowLabelY(m, y))}%` }}
-              disabled={!canAddArea(row)}
-              title={canAddArea(row) ? 'Aggiungi un’area in fondo a destra' : 'Massimo 5 aree per fila'}
-              onClick={() => onChange(addArea(layout, row.id))}
             >
-              + area
-            </button>
+              <button
+                type="button"
+                className="ov-btn ov-add"
+                disabled={!canAddArea(row)}
+                title={canAddArea(row) ? 'Aggiungi un’area in fondo a destra' : 'Massimo 5 aree per fila'}
+                onClick={() => onChange(addArea(layout, row.id))}
+              >
+                + area
+              </button>
+              <select
+                className="ov-btn ov-add ov-add-sonda"
+                value=""
+                disabled={libere.length === 0}
+                title={
+                  libere.length
+                    ? `Piazza una sonda in fila ${row.id}`
+                    : 'Tutte le sonde installate sono già sulla mappa'
+                }
+                onChange={(e) => {
+                  // 0.5 è solo il punto di partenza: addSensor scosta se trova
+                  // un'altra sonda troppo vicina.
+                  if (e.target.value) onChange(addSensor(layout, row.id, e.target.value, 0.5));
+                }}
+              >
+                <option value="">+ sonda</option>
+                {libere.map((id) => (
+                  <option key={id} value={id}>{id}</option>
+                ))}
+              </select>
+            </div>
 
             {row.aree.map((a, j) => {
               const from = areaFrom(row, j);
