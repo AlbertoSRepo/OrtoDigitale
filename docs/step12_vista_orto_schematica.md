@@ -683,8 +683,8 @@ Da applicare **nello stesso commit** dell'implementazione:
 
 ## Implementazione
 
-**Stato:** 🟡 CODICE COMPLETO E RIVISTO A SCHERMO — deploy sul RPi da fare
-**Commit di riferimento:** _(non ancora committato)_
+**Stato:** ✅ COMPLETATO — 2026-08-15
+**Commit di riferimento:** `feat(frontend): vista orto schematica con umidità sempre visibile` (e9f1ebd), `feat(nodered): endpoint /api/layout e tag aiuola/position reali` (26ff7b7)
 
 ### Verificato
 
@@ -701,11 +701,24 @@ stato approvato quanto a leggibilità dei valori, con quattro richieste di modif
 fila 3 a piena larghezza, inserimento dei glifi, glifo sonda, rimozione del perimetro —
 tutte applicate e riviste una seconda volta.
 
+### Verificato sul RPi dopo il deploy
+
+- `GET /api/layout` risponde 200 con 3 file, aree `[1, 3, 4]`, sonde `[2, 2, 0]`
+- **Tagging attivo**: i punti scritti dopo il deploy portano `aiuola=1/near`,
+  `2/near`, `2/far`, `1/far` per WH51_01–04. La stringa `test` non compare più
+  in nessun punto nuovo.
+- **Bug (b) chiuso**: `/api/sensors/last` restituisce aiuola e position reali per i
+  quattro sensori installati e `null` per WH51_05/06. Nessuna occorrenza di `test`.
+- MQTT si è riconnesso dopo il restart di Node-RED: le credenziali sono sopravvissute
+  (il `[warn] Encrypted credentials not found` nei log è rumore d'avvio, non una perdita).
+- I quattro PNG dei glifi sono serviti da Caddy: 200 su tutti.
+- `verify_rpi5.sh`: **TUTTO OK**, 15 gruppi di check verdi.
+
 ### NON verificato
 
-- Tema scuro: mai guardato, né da me né dall'utente.
-- Tutto ciò che richiede il RPi: endpoint servito da Node-RED, tagging effettivo su
-  InfluxDB, scomparsa della stringa `test` a schermo.
+- **Tema scuro**: mai guardato, né da me né dall'utente. Quattro illustrazioni a colori
+  pieni sopra bande tinte, su fondo `#14130f`, sono la combinazione più a rischio.
+- Resa a 390 px sul dispositivo reale.
 
 ### Deviazioni dalla spec
 
@@ -738,10 +751,12 @@ unità. Le metriche e le formule di banda sono state estratte in
 ragione per cui quel file esiste. Il test è stato verificato contro i valori vecchi e
 fallisce, quindi non è decorativo.
 
-### Da fare prima di marcare COMPLETATO
+### Code residui, non bloccanti
 
-1. Guardare la mappa in **tema scuro** e a 390 px (finora solo tema chiaro su desktop).
+1. Guardare la mappa in **tema scuro** e a 390 px.
 2. Sostituire `src/assets/sensor.svg`, che è un segnaposto.
-3. Deploy: `flows.json` + `orto_layout.seed.json` sul RPi, **ri-iniettare le credenziali Node-RED** (`docs/comandi_verifica.md §5.5`).
-4. Eseguire la checklist di §14.
-5. Applicare gli aggiornamenti a `CLAUDE.md` di §15.
+3. `rpi5/scripts/deploy_frontend.sh` e la skill `deploy-rpi` puntano entrambi a
+   `192.168.1.12` (Ethernet), che al momento del deploy non rispondeva: si è usato
+   `RPI_HOST=as@192.168.1.46`. Inoltre la skill dice che il percorso remoto è
+   `/opt/orto-digitale/<percorso-relativo>`, ma sul RPi il prefisso `rpi5/` **non
+   esiste**: `rpi5/nodered/data/` sta in `/opt/orto-digitale/nodered/data/`.

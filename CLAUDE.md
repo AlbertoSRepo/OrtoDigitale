@@ -107,7 +107,12 @@ Utenti in `mosquitto/config/password_file`: `gw3000`, `nodered`, `zigbee2mqtt`, 
 | `WH51_05` | 3 | near | Aiuola destra, 2m dall'ingresso acqua *(non installato)* |
 | `WH51_06` | 3 | far | Aiuola destra, 8m dall'ingresso acqua *(non installato)* |
 
-> **Nota:** al termine di step 2, i tag sono ancora `aiuola=test, position=test`. La migrazione ai valori reali è prevista prima di step 5 (dashboard definitiva).
+> Dallo step 12 questa tabella è un **fallback**. La collocazione autoritativa è
+> `GET /api/layout`, e `SENSOR_LOCATIONS` nel frontend serve solo quando il layout
+> non risponde.
+
+> **Nota:** i tag `aiuola`/`position` sono derivati dal **layout** (`GET /api/layout`), non più costanti. Migrati allo step 12 — prima valevano la stringa letterale `test`.
+> I punti scritti prima del 2026-08-15 conservano `aiuola=test`: in InfluxDB i tag dei punti già scritti sono immutabili.
 
 ---
 
@@ -160,7 +165,9 @@ Il GW3000 pubblica **tutti i sensori** in un unico topic `ecowitt/gw3000` come s
 | 8 | Meteo Open-Meteo nel frontend (no storicizzazione) | ✅ |
 | 9 | Settings: statistiche di sistema RPi5 (disco / CPU / RAM) | ✅ |
 | 10 | Tracciamento idrico SWV: polling attivo `flow` + field anomalie | ✅ |
-| 11 | Archiviazione CSV su USB | ⏳ Prossimo |
+| 11 | Archiviazione CSV su USB | ⏳ Da fare |
+| 12 | Vista orto schematica (umidità senza hover) | ✅ |
+| 13 | Editor layout orto + history spostamenti | ⏳ Prossimo |
 
 ---
 
@@ -176,6 +183,7 @@ Il GW3000 pubblica **tutti i sensori** in un unico topic `ecowitt/gw3000` come s
 | `rpi5/nodered/data/flows.json` | Flow Node-RED — source of truth |
 | `rpi5/scripts/verify_rpi5.sh` | Healthcheck 10-check |
 | `docs/frontend_dati_spec.md` | Spec dati per step 5 |
+| `rpi5/nodered/data/orto_layout.seed.json` | Layout orto di partenza (aree coltura + posizione sonde) |
 
 ### Pattern obbligatorio per docs/stepN_*.md
 
