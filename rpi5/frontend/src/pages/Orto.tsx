@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useStore } from '../state/store';
 import { useSensorsLast, useSensorsTrend } from '../api/sensors';
+import { useLayout } from '../api/layout';
 import { useWeatherForecast, useWeatherNow } from '../api/weather';
-import { Hero } from '../components/Hero';
+import { OrtoMap } from '../components/OrtoMap';
 import { HumidityChart } from '../components/HumidityChart';
 import { SensorList } from '../components/SensorList';
 import { WeatherCard } from '../components/WeatherCard';
@@ -16,6 +17,7 @@ export function Orto() {
   const [active, setActive] = useState<string | null>(null);
 
   const sensorsQ = useSensorsLast();
+  const layoutQ = useLayout();
   const trendQ = useSensorsTrend(period);
   const nowQ = useWeatherNow();
   const forecastQ = useWeatherForecast();
@@ -29,7 +31,8 @@ export function Orto() {
     <div className="tab-panel">
       <section className="grid" style={{ marginBottom: 18 }}>
         <div className="span-12">
-          <Hero
+          <OrtoMap
+            layout={layoutQ.data}
             sensors={sensors}
             thresholds={thresholds}
             activeSensor={active}

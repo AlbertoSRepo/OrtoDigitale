@@ -197,173 +197,64 @@ button { font-family: inherit; }
   .span-4, .span-3 { grid-column: span 12; }
 }
 
-/* ─── Hero / ortofoto ────────────────────────────────────────────────────── */
+/* ─── Mappa orto (SVG) ──────────────────────────────────────────────────── */
 
-.hero {
+.orto-map {
   position: relative;
-  border-radius: 0;
-  overflow: hidden;
-  background: transparent;
   border: 1px solid var(--rule);
-  isolation: isolate;
+  background: var(--paper-2);
 }
 
-.hero .photo {
-  position: relative;
-  aspect-ratio: 16 / 9;
-  width: 100%;
-  background-size: cover;
-  background-position: center;
-}
+.orto-map svg { display: block; width: 100%; height: auto; }
 
-.hero .photo::after {
-  /* subtle vignette to push UI forward */
-  content: "";
-  position: absolute; inset: 0;
-  background:
-    radial-gradient(120% 80% at 50% 50%, transparent 55%, rgba(0,0,0,0.28) 100%),
-    linear-gradient(180deg, rgba(0,0,0,0.10) 0%, transparent 28%, transparent 72%, rgba(0,0,0,0.18) 100%);
-  pointer-events: none;
-}
+.orto-soil { fill: var(--paper); }
 
-.hero-overlay {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
+.orto-row-edge { fill: none; stroke: var(--rule); stroke-width: 1; }
 
-.hero-overlay > * { pointer-events: auto; }
+.orto-divider { stroke: var(--rule); stroke-width: 1; opacity: 0.7; }
 
-.hero-caption {
-  position: absolute;
-  left: 22px;
-  top: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  color: #fbf6ea;
-  text-shadow: 0 1px 12px rgba(0,0,0,0.5);
-}
-.hero-caption .eyebrow { color: rgba(251, 246, 234, 0.78); }
-.hero-caption .title {
-  font-family: var(--serif);
-  font-size: 28px;
-  line-height: 1;
-  letter-spacing: 0.02em;
+.orto-row-label {
+  fill: var(--ink-3);
+  font-family: var(--mono);
+  letter-spacing: 0.12em;
   text-transform: uppercase;
 }
-
-.hero-legend {
-  position: absolute;
-  right: 18px;
-  top: 18px;
-  background: rgba(20, 19, 15, 0.62);
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
-  border: 0.5px solid rgba(255,255,255,0.14);
-  border-radius: 0;
-  padding: 10px 12px;
-  color: #fbf6ea;
-  font-family: var(--mono);
-  font-size: 10.5px;
+.orto-row-label .media {
+  fill: var(--ink);
   letter-spacing: 0.04em;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.hero-legend .bar {
-  width: 140px; height: 6px;
-  border-radius: 999px;
-  background: linear-gradient(90deg, var(--hm-dry) 0%, var(--hm-mid) 50%, var(--hm-wet) 100%);
-}
-.hero-legend .nums {
-  display: flex; gap: 8px;
-  color: rgba(251, 246, 234, 0.85);
 }
 
-/* aiuola guides on top of photo */
-.aiuola-guide {
-  position: absolute;
-  border: 0.5px dashed rgba(255, 246, 220, 0.35);
-  border-radius: 4px;
-  pointer-events: none;
-  font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  color: rgba(255, 246, 220, 0.7);
+.orto-pin { cursor: pointer; }
+.orto-probe {
+  /* alone chiaro: la sonda resta leggibile anche sopra una banda scura */
+  paint-order: stroke;
+  stroke: var(--paper);
+  stroke-width: 3;
+  stroke-linejoin: round;
 }
-.aiuola-guide .lbl {
-  position: absolute;
-  top: 6px; left: 8px;
-  text-transform: uppercase;
-}
+.orto-pin.active .orto-probe { stroke: var(--ink); }
 
-/* sensor pin */
-.pin {
-  position: absolute;
-  transform: translate(-50%, -50%);
-  cursor: pointer;
-}
-.pin .halo {
-  position: absolute;
-  inset: -6px;
-  border-radius: 999px;
-  opacity: 0.55;
-  filter: blur(0.5px);
-  transition: inset 200ms var(--ease), opacity 200ms var(--ease);
-}
-.pin .dot {
-  position: relative;
-  width: 22px; height: 22px;
-  border-radius: 999px;
-  display: grid; place-items: center;
-  color: #fff;
+/* paint-order dà l'alone in modo nativo: l'etichetta resta leggibile su
+   qualsiasi tinta senza pastiglia e senza misurare il testo. */
+.orto-pin-label {
+  fill: var(--ink);
   font-family: var(--mono);
-  font-size: 9.5px;
   font-weight: 600;
-  letter-spacing: 0.02em;
-  border: 1.5px solid rgba(255,255,255,0.85);
-  box-shadow: 0 2px 10px rgba(0,0,0,0.35);
-  transition: transform 160ms var(--ease);
-}
-.pin:hover .dot, .pin.active .dot { transform: scale(1.12); }
-.pin:hover .halo, .pin.active .halo { inset: -14px; opacity: 0.75; }
-
-.pin .ring {
-  position: absolute;
-  inset: -4px;
-  border: 1px solid rgba(255,255,255,0.6);
-  border-radius: 999px;
-  pointer-events: none;
-  animation: ringPulse 2.6s var(--ease) infinite;
-  opacity: 0;
-}
-.pin.online .ring { opacity: 1; }
-@keyframes ringPulse {
-  0% { inset: -4px; opacity: 0.55; }
-  100% { inset: -16px; opacity: 0; }
+  paint-order: stroke;
+  stroke: var(--paper);
+  stroke-width: 4;
+  stroke-linejoin: round;
 }
 
-/* heatmap blobs (when active) */
-.heatmap-blobs {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  mix-blend-mode: screen;
-}
-[data-theme="light"] .heatmap-blobs,
-:root:not([data-theme="dark"]) .heatmap-blobs {
-  mix-blend-mode: multiply;
-  opacity: 0.55;
-}
-.blob {
-  position: absolute;
-  width: 22%;
-  aspect-ratio: 1;
-  border-radius: 999px;
-  transform: translate(-50%, -50%);
-  filter: blur(28px);
-  opacity: 0.85;
+.orto-warn { fill: var(--terra); }
+
+.orto-stamp text {
+  fill: currentColor;
+  font-family: var(--sans);
+  paint-order: stroke;
+  stroke: var(--paper);
+  stroke-width: 3;
+  stroke-linejoin: round;
 }
 
 /* tooltip */
