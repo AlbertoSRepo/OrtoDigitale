@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "updated_at": 0,
+  "sensori": [
+    {
+      "sensor_id": "WH51_01",
+      "channel": 1,
+      "label": "",
+      "registered_at": 0
+    },
+    {
+      "sensor_id": "WH51_02",
+      "channel": 2,
+      "label": "",
+      "registered_at": 0
+    },
+    {
+      "sensor_id": "WH51_03",
+      "channel": 3,
+      "label": "",
+      "registered_at": 0
+    },
+    {
+      "sensor_id": "WH51_04",
+      "channel": 4,
+      "label": "",
+      "registered_at": 0
+    }
+  ]
+}
