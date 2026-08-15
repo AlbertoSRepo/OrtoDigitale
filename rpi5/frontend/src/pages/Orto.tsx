@@ -8,7 +8,6 @@ import { HumidityChart } from '../components/HumidityChart';
 import { WeatherCard } from '../components/WeatherCard';
 import { DateRangePicker } from '../components/DateRangePicker';
 import { DEFAULT_THRESHOLDS } from '../helpers/humidityColor';
-import { ACTIVE_SENSORS } from '../config/sensors';
 
 export function Orto() {
   const period = useStore((s) => s.periodOrto);
@@ -22,7 +21,8 @@ export function Orto() {
   const forecastQ = useWeatherForecast();
 
   const sensors = sensorsQ.data ?? [];
-  const installed = sensors.filter((s) => ACTIVE_SENSORS.has(s.sensor_id) && s.value !== null);
+  // Un sensore non registrato non ha dati: filtrare sul valore basta (step 14, D8).
+  const installed = sensors.filter((s) => s.value !== null);
   const avg = installed.length ? installed.reduce((a, s) => a + (s.value ?? 0), 0) / installed.length : null;
   const thresholds = DEFAULT_THRESHOLDS;
 

@@ -1704,3 +1704,66 @@ button { font-family: inherit; }
 }
 .orto-sonde-bar .chip button:hover { color: var(--terra); }
 .orto-sonde-bar .ov-crop { position: static; transform: none; }
+
+/* ─── Registro sensori (step 14) ────────────────────────────────────────── */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(20, 19, 15, 0.55);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+}
+.modal {
+  width: min(760px, 100%);
+  max-height: 85vh;
+  overflow-y: auto;
+  padding: 18px 20px 16px;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.tab-registro {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.tab-registro th {
+  padding: 6px 8px 6px 0;
+  border-bottom: 1px solid var(--rule);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 400;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  text-align: left;
+}
+.tab-registro td {
+  padding: 7px 8px 7px 0;
+  border-bottom: 1px solid var(--rule-2);
+  vertical-align: middle;
+}
+.tab-registro tr:last-child td { border-bottom: 0; }
+.tab-registro td:last-child,
+.tab-registro th:last-child { text-align: right; padding-right: 0; }
+.tab-registro .mono { font-family: var(--mono); font-size: 12px; }
+.tab-registro .tabular { font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.tab-registro .libera {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--moss);
+}

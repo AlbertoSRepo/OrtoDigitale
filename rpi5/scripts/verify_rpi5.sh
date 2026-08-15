@@ -456,6 +456,43 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# [17] Registro sensori (step 14)
+# ---------------------------------------------------------------------------
+section "Registro sensori (step 14)"
+
+REG_JSON=$(curl -sk --max-time 5 --resolve orto.local:443:127.0.0.1 https://orto.local/api/sensors/registry 2>/dev/null || true)
+if echo "$REG_JSON" | grep -q '"sensori"'; then
+  check_ok "GET /api/sensors/registry risponde"
+else
+  check_fail "GET /api/sensors/registry non risponde o payload inatteso"
+fi
+
+# Deregistrare tutto deve fallire se qualche sonda e' piazzata: e' il guard
+# che impedisce al layout di puntare a un sensore inesistente.
+REG_CODE=$(curl -sk --max-time 5 -o /dev/null -w '%{http_code}'   --resolve orto.local:443:127.0.0.1 -X PUT https://orto.local/api/sensors/registry   -H 'Content-Type: application/json' -d '{"version":1,"sensori":[]}' 2>/dev/null || true)
+if [ "$REG_CODE" = "400" ]; then
+  check_ok "PUT rifiuta la deregistrazione di sonde piazzate (400)"
+elif [ "$REG_CODE" = "200" ]; then
+  check_warn "PUT ha accettato un registro vuoto: nessuna sonda risulta piazzata?"
+else
+  check_fail "PUT /api/sensors/registry: atteso 400, ricevuto ${REG_CODE:-nessuna risposta}"
+fi
+
+if [ -f /opt/orto-digitale/nodered/data/orto_sensors.seed.json ]; then
+  check_ok "seed del registro presente sul volume"
+else
+  check_fail "orto_sensors.seed.json mancante: senza registro l'ingest va in fail-open"
+fi
+
+# Un sensore registrato deve avere una lettura recente dal gateway: se nessuno
+# ce l'ha, o il gateway tace o l'ingest non sta piu' girando.
+if echo "$REG_JSON" | grep -q '"gateway": *{'; then
+  check_ok "almeno un sensore registrato e' rilevato dal gateway"
+else
+  check_warn "nessun sensore rilevato dal gateway (Node-RED appena riavviato? GW3000 muto?)"
+fi
+
+# ---------------------------------------------------------------------------
 # Report finale
 # ---------------------------------------------------------------------------
 echo

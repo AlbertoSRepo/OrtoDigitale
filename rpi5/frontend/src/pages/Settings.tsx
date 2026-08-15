@@ -3,6 +3,7 @@ import { useStore } from '../state/store';
 import { useShutdown, useShutdownCancel, useSystemHealth } from '../api/system';
 import { ShutdownModal } from '../components/ShutdownModal';
 import { SystemStats } from '../components/SystemStats';
+import { SensorRegistryTable } from '../components/SensorRegistryTable';
 import { fmtHM } from '../helpers/formatDuration';
 
 const APP_VERSION = '0.1.0';
@@ -117,6 +118,16 @@ export function Settings() {
               </div>
             </div>
           </div>
+        </div>
+      </section>
+
+      <section className="grid" style={{ marginTop: 18 }}>
+        <div className="card span-12">
+          <div className="card-head">
+            <h3>Sensori registrati</h3>
+            <span className="eyebrow">registro · WH51</span>
+          </div>
+          <SensorRegistryTable />
         </div>
       </section>
 

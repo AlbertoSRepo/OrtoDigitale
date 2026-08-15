@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from 'react';
 import type { Layout, LayoutRow, SensorLast } from '../api/types';
 import { FILE_GEOM, crop, rowLength } from '../config/orto';
 import { cropGlyph } from '../config/cropGlyphs';
-import { ACTIVE_SENSORS, SENSOR_LOCATIONS } from '../config/sensors';
+import { SENSOR_LOCATIONS } from '../config/sensors';
 import { humidityColor, type Thresholds } from '../helpers/humidityColor';
 import { moistureBands } from '../helpers/moistureBands';
 import {
@@ -28,18 +28,19 @@ interface Props {
   /** In editor la mappa diventa interattiva; `layout` e' la bozza. */
   editing?: boolean;
   onChange?: (l: Layout) => void;
+  libereSonde?: string[];
+  onNuovoSensore?: (fila: number) => void;
 }
 
 interface Hover {
   sensor: SensorLast;
-  installed: boolean;
   x: number;
   y: number;
 }
 
 export function OrtoMap({
   layout, sensors, thresholds, activeSensor, onSelectSensor,
-  editing = false, onChange,
+  editing = false, onChange, libereSonde = [], onNuovoSensore,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -103,7 +104,15 @@ export function OrtoMap({
         ))}
       </svg>
 
-      {editing && layout && onChange && <OrtoOverlay layout={layout} m={m} onChange={onChange} />}
+      {editing && layout && onChange && (
+        <OrtoOverlay
+          layout={layout}
+          m={m}
+          onChange={onChange}
+          libere={libereSonde}
+          onNuovoSensore={onNuovoSensore ?? (() => {})}
+        />
+      )}
       {hover && <SensorTooltip hover={hover} />}
     </div>
   );
@@ -117,7 +126,7 @@ interface RowProps {
   thresholds: Thresholds;
   activeSensor: string | null;
   onSelectSensor: (id: string | null) => void;
-  onHover: (h: { sensor: SensorLast; installed: boolean; x: number; y: number } | null) => void;
+  onHover: (h: { sensor: SensorLast; x: number; y: number } | null) => void;
   editing: boolean;
   frazione: (clientX: number, filaId: number) => number;
   onChange?: (l: Layout) => void;
@@ -133,7 +142,7 @@ function Row({
 
   const readings = row.sensori
     .map((s) => byId.get(s.sensor_id))
-    .filter((s): s is SensorLast => !!s && ACTIVE_SENSORS.has(s.sensor_id) && s.value !== null);
+    .filter((s): s is SensorLast => !!s && s.value !== null);
   const media = readings.length
     ? readings.reduce((a, s) => a + (s.value ?? 0), 0) / readings.length
     : null;
@@ -163,7 +172,7 @@ function Row({
       ) : (
         bands.map((b) => {
           const s = byId.get(b.sensor_id);
-          const usable = s && ACTIVE_SENSORS.has(b.sensor_id) && s.online && s.value !== null;
+          const usable = s && s.online && s.value !== null;
           return (
             <rect
               key={b.sensor_id}
@@ -249,15 +258,14 @@ function Pins({
     .sort((a, b) => a.x - b.x)
     .map((p) => {
       const s = byId.get(p.sensor_id);
-      const installed = ACTIVE_SENSORS.has(p.sensor_id);
-      const value = installed && s?.value != null ? s.value : null;
+      const value = s?.value != null ? s.value : null;
       const label = `${p.sensor_id.slice(-2)} · ${value !== null ? `${value.toFixed(0)}%` : 'n.d.'}`;
       const warn = s?.battery_ok === false;
       const testoW = textW(label, m.fsValue);
       const totaleW = testoW + (warn ? m.fsValue * 0.9 : 0);
       const cx = clampProbe(p.x * w, m.probe, w);
       return {
-        p, s, installed, warn, label, testoW,
+        p, s, warn, label, testoW,
         colore: value !== null && s?.online ? humidityColor(value, thresholds) : 'var(--ink-4)',
         cx,
         x0: labelX(cx, totaleW, w, m.probe * 0.6),
@@ -282,9 +290,8 @@ function Pins({
           <g
             key={it.p.sensor_id}
             className={`orto-pin ${activeSensor === it.p.sensor_id ? 'active' : ''}`}
-            opacity={it.installed ? 1 : 0.5}
             onMouseEnter={(e) => {
-              if (it.s) onHover({ sensor: it.s, installed: it.installed, x: e.clientX, y: e.clientY });
+              if (it.s) onHover({ sensor: it.s, x: e.clientX, y: e.clientY });
               onSelectSensor(it.p.sensor_id);
             }}
             onMouseLeave={() => {
@@ -391,20 +398,14 @@ function SensorTooltip({ hover }: { hover: Hover }) {
           {s.sensor_id}
         </span>
       </div>
-      {!hover.installed ? (
-        <span className="v" style={{ fontSize: 14 }}>
-          sensore non installato
-        </span>
-      ) : (
-        <dl>
+      <dl>
           <dt>batteria</dt>
           <dd>{s.battery_ok === null ? '—' : s.battery_ok ? 'ok' : 'scarica'}</dd>
           <dt>rssi</dt>
           <dd>{s.rssi ?? '—'} dBm</dd>
           <dt>letta</dt>
           <dd>{s.timestamp ? fmtRelative(s.timestamp) : '—'}</dd>
-        </dl>
-      )}
+      </dl>
     </div>
   );
 }

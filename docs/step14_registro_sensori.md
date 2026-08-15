@@ -330,4 +330,49 @@ curl -sk -X PUT https://orto.local/api/sensors/registry \
 
 ## Implementazione
 
-**Stato:** ⏳ DA IMPLEMENTARE
+**Stato:** 🟡 IMPLEMENTATO E DEPLOYATO — prova a mano dell'interfaccia da fare
+**Commit:** `feat(nodered): registro dei sensori con scoperta dal gateway` (7a47d10)
+
+### Verificato
+
+Backend, con `rpi5/nodered/test/registro_sensori.test.mjs` — 23 controlli che eseguono
+i corpi di `parse WH51` e `registro sensori` **letti da `flows.json`**, con filesystem
+finto: ingest filtrato, fail-open, uscita dalla cache alla deregistrazione, canale che
+segue il registro, tutti i codici di validazione, blocco della deregistrazione.
+
+Frontend, con `registryOps.test.ts` — 11 controlli sulle operazioni pure. Totale del
+progetto: **109 controlli** (62 frontend + 23 registro + 24 layout).
+
+Sul RPi dopo il deploy: `GET` restituisce i quattro sensori con posizione presa dal
+layout e stato gateway (`50% batt 1.6V, 12s fa`); `rilevati` vuoto, coerente col fatto
+che il GW3000 pubblica esattamente i canali 1–4; il `PUT` di un registro vuoto
+risponde `400` con quattro `sensor_in_use` e il messaggio che dice in quale fila sta
+ciascuna; **i punti continuano ad arrivare su `soil_moisture` con i tag corretti**,
+che è la verifica che conta di più avendo toccato il percorso dei dati.
+
+`verify_rpi5.sh` sezione [17] verde, healthcheck completo **TUTTO OK**.
+
+### Difetto trovato in produzione
+
+Al primo deploy `placement` era `null` per tutti i sensori. Il nodo leggeva il layout
+da `global.orto_layout`, che dopo un riavvio è vuoto finché qualcuno non chiama
+`GET /api/layout`.
+
+Non era cosmetico: **è la stessa mappa che regge il blocco alla deregistrazione**, e in
+quella finestra si sarebbe potuto cancellare dal registro un sensore ancora piazzato.
+Corretto facendo leggere il layout da file quando `global` è vuoto, con due test di
+regressione che simulano lo stato post-riavvio.
+
+### Deviazioni dalla spec
+
+| Deviazione | Motivo |
+|---|---|
+| `ACTIVE_SENSORS` eliminato del tutto, non sostituito | Con l'ingest filtrato dal registro, un sensore non registrato **non ha dati**: filtrare su `value !== null` basta ovunque. Sparisce anche da `HumidityChart` e da `pages/Orto.tsx` |
+| `format response` di `/api/sensors/last` legge il registro | Restava l'ultimo elenco scritto a mano (`WH51_01..06`): un sensore deregistrato sarebbe rimasto in risposta con valori nulli per sempre |
+| `nuovoId()` cerca il primo id libero se quello naturale è preso | Dopo un ri-aggancio id e canale non coincidono più: registrare il canale 3 quando `WH51_03` esiste già su un altro canale avrebbe generato un duplicato |
+
+### Da fare
+
+1. Provare a mano: aprire «＋ nuovo sensore…», la finestra dei rilevati, la tabella in Impostazioni, rinomina e deregistrazione.
+2. Verificare sul campo con una sonda vera accoppiata su un canale nuovo.
+3. Marcare COMPLETATO e aggiornare `CLAUDE.md` §13.

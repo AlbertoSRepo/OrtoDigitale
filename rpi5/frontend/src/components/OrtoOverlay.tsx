@@ -1,17 +1,21 @@
 import { useRef, useState } from 'react';
 import type { Layout } from '../api/types';
 import { CROPS, rowLength } from '../config/orto';
-import { ACTIVE_SENSORS } from '../config/sensors';
 import {
-  addArea, addSensor, areaFrom, canAddArea, canRemoveArea, placedSensors, removeArea,
-  reorderArea, setCrop,
+  addArea, addSensor, areaFrom, canAddArea, canRemoveArea, removeArea, reorderArea, setCrop,
 } from '../helpers/layoutOps';
 import { rowLabelY, rowTop, totalHeight, type OrtoMetrics } from '../helpers/ortoMetrics';
+
+/** Valore speciale della tendina `+ sonda`: apre la finestra dei rilevati. */
+export const NUOVO_SENSORE = '__nuovo__';
 
 interface Props {
   layout: Layout;
   m: OrtoMetrics;
   onChange: (l: Layout) => void;
+  /** Sonde registrate e non ancora piazzate (dal registro, step 14). */
+  libere: string[];
+  onNuovoSensore: (fila: number) => void;
 }
 
 /** Sotto questa larghezza (unità viewBox) il menu a tendina non ci sta. */
@@ -25,13 +29,11 @@ const MIN_PER_TENDINA = 130;
  * grande diventerebbe enorme. Posizionando i controlli in percentuale sopra la
  * mappa restano di dimensione naturale, e la geometria resta comunque una sola.
  */
-export function OrtoOverlay({ layout, m, onChange }: Props) {
+export function OrtoOverlay({ layout, m, onChange, libere, onNuovoSensore }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [trascinata, setTrascinata] = useState<{ fila: number; i: number } | null>(null);
 
   const totalH = totalHeight(m, layout.file.length);
-  const piazzate = placedSensors(layout);
-  const libere = [...ACTIVE_SENSORS].filter((id) => !piazzate.has(id)).sort();
   const pctX = (vbX: number) => ((vbX + m.pad) / (m.vw + m.pad * 2)) * 100;
   const pctY = (vbY: number) => (vbY / totalH) * 100;
 
@@ -66,22 +68,21 @@ export function OrtoOverlay({ layout, m, onChange }: Props) {
               <select
                 className="ov-btn ov-add ov-add-sonda"
                 value=""
-                disabled={libere.length === 0}
-                title={
-                  libere.length
-                    ? `Piazza una sonda in fila ${row.id}`
-                    : 'Tutte le sonde installate sono già sulla mappa'
-                }
+                title={`Piazza una sonda in fila ${row.id}, o registrane una nuova`}
                 onChange={(e) => {
+                  const v = e.target.value;
+                  if (!v) return;
+                  if (v === NUOVO_SENSORE) return onNuovoSensore(row.id);
                   // 0.5 è solo il punto di partenza: addSensor scosta se trova
                   // un'altra sonda troppo vicina.
-                  if (e.target.value) onChange(addSensor(layout, row.id, e.target.value, 0.5));
+                  onChange(addSensor(layout, row.id, v, 0.5));
                 }}
               >
                 <option value="">+ sonda</option>
                 {libere.map((id) => (
                   <option key={id} value={id}>{id}</option>
                 ))}
+                <option value={NUOVO_SENSORE}>＋ nuovo sensore…</option>
               </select>
             </div>
 

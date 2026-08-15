@@ -10,7 +10,6 @@ import {
   YAxis,
 } from 'recharts';
 import type { SensorTrend } from '../api/types';
-import { ACTIVE_SENSORS } from '../config/sensors';
 import { humidityColor, type Thresholds } from '../helpers/humidityColor';
 import { fmtDateTime } from '../helpers/formatDate';
 
@@ -112,7 +111,6 @@ export function HumidityChart({ trend, thresholds, loading }: Props) {
             }}
           />
           {SENSOR_ORDER.map((id, idx) => {
-            if (!ACTIVE_SENSORS.has(id)) return null;
             return (
               <Line
                 key={id}

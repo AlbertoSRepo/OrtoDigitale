@@ -3,8 +3,10 @@ import { useQueryClient } from '@tanstack/react-query';
 import { putLayout } from '../api/layout';
 import type { Layout } from '../api/types';
 import { SENSOR_LOCATIONS } from '../config/sensors';
-import { placedSensors, removeSensor, validateLayout } from '../helpers/layoutOps';
+import { useRegistry } from '../api/registry';
+import { addSensor, placedSensors, removeSensor, validateLayout } from '../helpers/layoutOps';
 import { useMediaQuery } from '../helpers/useMediaQuery';
+import { NewSensorModal } from './NewSensorModal';
 import { OrtoMap } from './OrtoMap';
 
 interface Props {
@@ -26,6 +28,8 @@ export function OrtoEditor({ layout, sensors, thresholds, activeSensor, onSelect
   const [draft, setDraft] = useState<Layout | null>(null);
   const [salvando, setSalvando] = useState(false);
   const [erroreServer, setErroreServer] = useState<string | null>(null);
+  const [nuovoSuFila, setNuovoSuFila] = useState<number | null>(null);
+  const registro = useRegistry();
 
   // L'editor è desktop-only: serve un puntatore fine e spazio (step 13, §3).
   const editabile = useMediaQuery('(min-width: 900px)') && useMediaQuery('(pointer: fine)');
@@ -35,6 +39,12 @@ export function OrtoEditor({ layout, sensors, thresholds, activeSensor, onSelect
   const errori = useMemo(() => (draft ? validateLayout(draft) : []), [draft]);
 
   const piazzate = useMemo(() => (draft ? placedSensors(draft) : new Map()), [draft]);
+  // Le sonde piazzabili sono quelle REGISTRATE e non ancora sulla mappa: non
+  // piu' una costante nel codice (step 14, D8).
+  const libereSonde = useMemo(
+    () => (registro.data?.sensori ?? []).map((s) => s.sensor_id).filter((id) => !piazzate.has(id)).sort(),
+    [registro.data, piazzate],
+  );
   // Se una sonda finisce in una fila diversa dalla sua aiuola di targa, le
   // nuove letture verranno registrate con la fila nuova (step 13, §9).
   const riassegnate = useMemo(
@@ -155,7 +165,17 @@ export function OrtoEditor({ layout, sensors, thresholds, activeSensor, onSelect
         onSelectSensor={onSelectSensor}
         editing={editing}
         onChange={setDraft}
+        libereSonde={libereSonde}
+        onNuovoSensore={setNuovoSuFila}
       />
+
+      {nuovoSuFila !== null && draft && (
+        <NewSensorModal
+          fila={nuovoSuFila}
+          onClose={() => setNuovoSuFila(null)}
+          onRegistrato={(id) => setDraft(addSensor(draft, nuovoSuFila, id, 0.5))}
+        />
+      )}
     </>
   );
 }

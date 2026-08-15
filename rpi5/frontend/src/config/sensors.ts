@@ -39,5 +39,6 @@ export const SENSOR_LOCATIONS: Record<string, { aiuola: number; position: 'near'
   WH51_06: { aiuola: 3, position: 'far' },
 };
 
-// Sensori fisicamente installati (gli altri sono mostrati grigi).
-export const ACTIVE_SENSORS = new Set(['WH51_01', 'WH51_02', 'WH51_03', 'WH51_04']);
+// L'elenco dei sensori esistenti non sta piu' qui: e' il registro, servito da
+// GET /api/sensors/registry (step 14). SENSOR_LOCATIONS resta solo come
+// fallback per l'avviso di riassegnazione aiuola.
