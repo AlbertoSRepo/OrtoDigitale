@@ -373,12 +373,21 @@ Degradazione per larghezza dell'area in pixel resi:
 
 | Larghezza | Resa |
 |---|---|
-| ≥ 150 | glifo + etichetta + conteggio |
-| 80–150 | glifo + conteggio |
-| 34–80 | solo glifo |
-| < 34 | nulla: resta il solo divisore |
+| ≥ `labelMinPx` | glifo + etichetta + conteggio |
+| ≥ `countMinPx` | glifo + conteggio |
+| ≥ `glyphMinPx` | solo glifo |
+| sotto | nulla: resta il solo divisore |
 
-(soglie in unità viewBox; il glifo è alto 44 unità su desktop, 76 su mobile)
+Le soglie sono **metriche**, non costanti nel componente:
+
+| | `labelMinPx` | `countMinPx` | `glyphMinPx` |
+|---|---|---|---|
+| desktop | 150 | 80 | 34 |
+| mobile | ∞ | ∞ | 34 |
+
+Su mobile resta quindi il **solo glifo**: nome e conteggio non compaiono mai. È
+espresso spingendo le soglie a infinito invece che con un ramo dedicato, così la
+degradazione ha un percorso solo.
 
 Le aree `libero` non hanno glifo né etichetta a nessuna larghezza: si disegnano come
 terreno nudo (§6.1).
@@ -444,9 +453,17 @@ le metriche verticali e le dimensioni tipografiche. Le costanti e le formule sta
 | spazio etichetta | 30 | 46 |
 | glifo coltura / sonda | 44 / 26 | 76 / 40 |
 | corpo valore / timbro | 22 / 13 | 34 / 20 |
+| lunghezze proporzionali | sì | **no** |
+| timbro coltura | glifo + nome + conteggio | **solo glifo** |
 
-Fila 3 occupa `vw` per intero; fila 1 e 2 ne prendono 0.722 e 0.790. Il `viewBox` si
-allarga di `pad` per lato, così nessuna riga tocca il bordo della card.
+Su desktop fila 3 occupa `vw` per intero e fila 1 e 2 ne prendono 0.722 e 0.790.
+
+Su mobile le tre file sono **lunghe uguale** (`proportional: false`). Le proporzioni
+reali sono informazione vera, ma su uno schermo stretto costano larghezza a fila 1 e 2
+senza che nessuno vada a misurarle: meglio spendere quei pixel per rendere leggibili
+aree e glifi. Il rapporto fra le file resta visibile su desktop, dove lo spazio c'è.
+
+Il `viewBox` si allarga di `pad` per lato, così nessuna riga tocca il bordo della card.
 
 Su mobile la riga è molto più alta **in rapporto alla larghezza**: scalando a schermo
 stretto, metriche identiche a quelle desktop schiaccerebbero le etichette.
@@ -750,6 +767,12 @@ unità. Le metriche e le formule di banda sono state estratte in
 `src/helpers/ortoMetrics.ts` proprio perché un test potesse raggiungerle: è l'unica
 ragione per cui quel file esiste. Il test è stato verificato contro i valori vecchi e
 fallisce, quindi non è decorativo.
+
+### Revisione mobile (2026-08-15, dopo il primo deploy)
+
+Su richiesta, due modifiche al solo mobile: file di pari lunghezza e timbri ridotti al
+solo glifo. Entrambe espresse come metriche (`proportional`, `labelMinPx`,
+`countMinPx`), non come rami nel componente.
 
 ### Code residui, non bloccanti
 
