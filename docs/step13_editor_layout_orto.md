@@ -56,66 +56,66 @@ gesture handling, long-press, e conflitti con lo scroll della pagina.
 
 ---
 
-## 4. Grammatica delle interazioni
+## 4. Interazioni
 
-Una regola sola, invece di un elenco di casi speciali:
+> **Seconda stesura.** La prima versione affidava tutto al tasto destro. Provata a
+> schermo è stata scartata: un menu contestuale nasconde le azioni finché non lo si
+> cerca, e su una mappa non c'è nulla che suggerisca dove cliccare. I comandi sono
+> stati portati **in posto**, visibili sull'area a cui appartengono.
 
-> **trascinare = continuo · tasto destro = discreto**
+Il tasto destro non è più usato da nessuna parte.
 
-| Gesto | Bersaglio | Effetto |
+| Comando | Dove | Effetto |
 |---|---|---|
-| trascina | divisorio | ridimensiona le **due** aree adiacenti |
-| trascina | pin | sposta il sensore lungo la fila |
-| destro | area | *Dividi qui* · *Coltura ▸* · *Unisci a sinistra* · *Unisci a destra* · *Piante − / +* |
-| destro | fila (fuori da un pin) | *Aggiungi misuratore ▸* |
-| destro | pin | *Cambia sensore ▸* · *Rimuovi misuratore* |
+| **+ area** | sopra la fila, a destra | aggiunge un'area in fondo a destra |
+| **✕** | in alto a sinistra dell'area | elimina l'area |
+| **tendina coltura** | al centro dell'area | cambia la coltura |
+| **⠿** | in alto a destra dell'area | trascina per cambiare l'ordine delle aree |
+| trascina | divisorio | ridimensiona le due aree adiacenti |
+| trascina | sonda | sposta la sonda lungo la fila |
+| **✕** su chip sonda | barra editor | toglie la sonda dalla mappa |
+| **tendina sonde** | barra editor | piazza una sonda non ancora sulla mappa |
 
-### 4.1 Divisori
+### 4.1 Da dove arriva lo spazio
 
-Il modello a partizione (step 12, D2) fa sì che trascinare un divisorio muova un
-confine condiviso: entrambe le aree adiacenti cambiano, la somma resta `1.0`.
-È il comportamento dei divisori di finestra, che è l'analogia da cui il requisito
-è nato.
+La partizione somma sempre a 1, quindi ogni comando deve dire da dove prende o dove
+cede lo spazio. Non è un dettaglio: è ciò che rende le operazioni sempre valide.
 
-Clamp durante il trascinamento:
+**+ area** lo prende dall'**ultima area**, che si divide a metà. È l'unica sorgente
+possibile, dato che la nuova occupa proprio il tratto finale. Disabilitata a 5 aree,
+o se l'ultima è più stretta di `2 × MIN_AREA` e non può cedere metà di sé.
 
-```
-minTo = to(i-1) + 0.05
-maxTo = to(i+1) - 0.05
-```
+**✕** cede lo spazio al **vicino di sinistra**, o a quello di destra se era la prima.
+Sopravvive la coltura del **vicino**, non quella dell'area eliminata: si sta
+cancellando, non fondendo. È la differenza con `mergeArea`, che invece tiene la
+coltura dell'area su cui si agisce. Disabilitata sull'ultima area rimasta.
 
-Il divisorio non può quindi mai superare i vicini né schiacciare un'area sotto il 5%.
-Nessuno stato intermedio del trascinamento è invalido: non serve validare al rilascio.
+**⠿** non tocca lo spazio: le larghezze restano attaccate alle aree e si permutano
+con loro, e i confini vengono ricalcolati a cascata.
 
-### 4.2 Voci di menu — abilitazione
+### 4.2 Divisori
 
-| Voce | Disabilitata quando |
-|---|---|
-| *Dividi qui* | la fila ha già 5 aree, **o** il punto di click cadrebbe a meno di 5% da un confine |
-| *Unisci a sinistra* | l'area è la prima |
-| *Unisci a destra* | l'area è l'ultima |
-| *Piante −* | `n === 0` |
-| *Piante +* | `n === 20` |
-| *Aggiungi misuratore* | tutti i sensori attivi sono già piazzati |
+Trascinare un divisorio muove un confine condiviso: entrambe le aree adiacenti
+cambiano, la somma resta 1. Clamp: `to(i-1) + MIN_AREA ≤ to ≤ to(i+1) − MIN_AREA`,
+quindi **nessuno stato intermedio del trascinamento è invalido** e non serve validare
+al rilascio.
 
-*Unisci* elimina il confine e assegna all'area risultante la coltura di quella su cui
-si è aperto il menu.
+### 4.3 Perché HTML e non `<foreignObject>`
 
-*Dividi qui* crea un confine nel punto di click; la nuova area a destra eredita la
-coltura, con `n` ripartito proporzionalmente alla larghezza (arrotondato).
+I controlli sono HTML vero, posizionato in percentuale sopra l'SVG. Dentro un
+`foreignObject` erediterebbero la scala del `viewBox`: a schermo grande un `<select>`
+diventerebbe enorme, a schermo piccolo illeggibile. Sovrapposti restano di dimensione
+naturale, e la geometria resta comunque calcolata una volta sola.
 
-### 4.3 Menu contestuale
+La tendina della coltura sparisce sotto le **130 unità viewBox** di larghezza, dove
+non ci starebbe. ✕ e ⠿ restano: sono 20 px e ci stanno sempre.
 
-Componente custom, con `onContextMenu` + `preventDefault()` sul menu nativo del
-browser, attivo **solo** in modalità editor. Chiusura su `Escape`, click fuori, o
-scroll.
+### 4.4 Sonde
 
-### 4.4 Pin
-
-Clamp `x ∈ [0, 1]`, con distanza minima `0.03` da un altro pin della stessa fila.
-Il dropdown *Aggiungi misuratore* elenca i sensori in `ACTIVE_SENSORS` non ancora
-piazzati altrove. Sceglierne uno la cui aiuola di targa differisce dalla fila
-produce l'avviso di §9, ma **non** viene impedito.
+Clamp `x ∈ [0, 1]`, con distanza minima `0.03` da un'altra sonda della stessa fila.
+La tendina elenca i sensori in `ACTIVE_SENSORS` non ancora piazzati; sceglierne uno lo
+mette al centro della **sua aiuola di targa**. Spostarlo poi in un'altra fila produce
+l'avviso di §9, ma non viene impedito.
 
 ---
 
@@ -338,17 +338,17 @@ terreno, il layout deve poterlo dire.
 
 | File | Contenuto |
 |---|---|
-| `src/components/OrtoMap/useLayoutDraft.ts` | bozza, operazioni, validazione client |
-| `src/components/OrtoMap/ContextMenu.tsx` | menu custom |
-| `src/components/OrtoMap/EditorToolbar.tsx` | Modifica / Salva / Annulla + stato dirty |
-| `src/components/OrtoMap/useDragHandle.ts` | trascinamento con clamp, pointer events |
-| `src/helpers/layoutValidation.ts` | invarianti condivise client/server |
+| `src/helpers/layoutOps.ts` | operazioni pure sul layout + validazione |
+| `src/components/OrtoOverlay.tsx` | controlli in posto sopra la mappa |
+| `src/components/OrtoEditor.tsx` | bozza, barra, avvisi, gestione sonde |
+| `src/helpers/layoutOps.test.ts` | 29 controlli sulle operazioni |
+
 
 ### Modificati
 
 | File | Modifica |
 |---|---|
-| `src/components/OrtoMap/index.tsx` | modalità editor, maniglie, bersagli del menu |
+| `src/components/OrtoMap.tsx` | modalità editor, maniglie divisori e sonde |
 | `src/api/layout.ts` | `putLayout()` + mutation |
 | `src/pages/Orto.tsx` | toolbar editor |
 | `rpi5/nodered/data/flows.json` | `PUT /api/layout`, validazione, diff, scrittura `events` |
@@ -510,7 +510,7 @@ container, bucket con retention infinita. Healthcheck completo **TUTTO OK**.
 
 ### NON verificato
 
-L'editor **non è mai stato usato a mano**: l'estensione Chrome non è collegata in
+L'editor nella **seconda stesura** (controlli in posto) non è ancora stato usato a mano: l'estensione Chrome non è collegata in
 questa sessione. Trascinamento divisori e sonde, menu contestuale, Salva/Annulla e
 l'avviso di riassegnazione hanno il typecheck e la logica sotto test, ma nessuno li
 ha ancora toccati col mouse.
