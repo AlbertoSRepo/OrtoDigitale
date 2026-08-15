@@ -21,7 +21,24 @@ export interface OrtoMetrics {
   labelH: number;
   fsValue: number;
   fsSmall: number;
-  /** Lato del riquadro in cui sta il glifo coltura. */
+  /**
+   * Lato del riquadro in cui sta il glifo coltura. **È questo il parametro da
+   * toccare per ingrandire o rimpicciolire le icone delle colture.**
+   *
+   * Ha un tetto, imposto da tre vincoli che `ortoMetrics.test.ts` verifica:
+   * il glifo non deve pestare l'etichetta di una sonda sfalsata, né il glifo
+   * della sonda stessa, né uscire dal bordo basso della riga. In pratica:
+   *
+   *     glyph_max ≈ min(
+   *       (stampY − pinY − flipOffset − labelHalf(fsValue)) / 0.62,
+   *       (rowH − stampY) / 0.38
+   *     )
+   *
+   * Con i valori attuali il tetto è ~89 su desktop e ~137 su mobile. Per andare
+   * oltre bisogna prima alzare `rowH`. Non serve calcolarlo a mano: alza `glyph`
+   * e lancia `npm test` — se hai passato il limite i test falliscono dicendo
+   * quale vincolo hai rotto.
+   */
   glyph: number;
   /** Lato del glifo sonda. */
   probe: number;
@@ -37,8 +54,8 @@ export interface OrtoMetrics {
 }
 
 export const DESKTOP: OrtoMetrics = {
-  vw: 1150, rowH: 132, gap: 22, pad: 14, labelH: 30,
-  fsValue: 22, fsSmall: 13, fsLabel: 13, glyph: 52, probe: 26,
+  vw: 1150, rowH: 170, gap: 22, pad: 14, labelH: 30,
+  fsValue: 22, fsSmall: 13, fsLabel: 13, glyph: 84, probe: 26,
   proportional: true,
   labelMinPx: 150, countMinPx: 80, glyphMinPx: 34,
 };
@@ -46,7 +63,7 @@ export const DESKTOP: OrtoMetrics = {
 // Su mobile: file tutte uguali, e nel timbro resta il solo glifo.
 export const MOBILE: OrtoMetrics = {
   vw: 1000, rowH: 260, gap: 26, pad: 16, labelH: 46,
-  fsValue: 34, fsSmall: 20, fsLabel: 20, glyph: 92, probe: 40,
+  fsValue: 34, fsSmall: 20, fsLabel: 20, glyph: 120, probe: 40,
   proportional: false,
   labelMinPx: Infinity, countMinPx: Infinity, glyphMinPx: 34,
 };
@@ -64,7 +81,7 @@ export const rowLabelY = (m: OrtoMetrics, top: number) => top - m.labelH * 0.3;
 export const pinY = (m: OrtoMetrics, top: number) => top + m.rowH * 0.24;
 
 /** Banda inferiore: i timbri coltura (baseline del testo). */
-export const stampY = (m: OrtoMetrics, top: number) => top + m.rowH * 0.82;
+export const stampY = (m: OrtoMetrics, top: number) => top + m.rowH * 0.8;
 
 /** Di quanto scende un'etichetta pin sfalsata per non pestare la precedente. */
 export const flipOffset = (m: OrtoMetrics) => m.fsValue * 1.15;

@@ -5,7 +5,6 @@ import { useLayout } from '../api/layout';
 import { useWeatherForecast, useWeatherNow } from '../api/weather';
 import { OrtoMap } from '../components/OrtoMap';
 import { HumidityChart } from '../components/HumidityChart';
-import { SensorList } from '../components/SensorList';
 import { WeatherCard } from '../components/WeatherCard';
 import { DateRangePicker } from '../components/DateRangePicker';
 import { DEFAULT_THRESHOLDS } from '../helpers/humidityColor';
@@ -42,7 +41,7 @@ export function Orto() {
       </section>
 
       <section className="grid" style={{ marginBottom: 18 }}>
-        <div className="card span-7 orto-humidity">
+        <div className="card span-12 orto-humidity">
           <div className="card-head">
             <h3>Umidità del terreno</h3>
             <DateRangePicker value={period} onChange={setPeriod} />
@@ -56,14 +55,6 @@ export function Orto() {
             <span className="v">{avg !== null ? `${avg.toFixed(1)}%` : '—'}</span>
           </div>
           <HumidityChart trend={trendQ.data} thresholds={thresholds} loading={trendQ.isLoading} />
-        </div>
-
-        <div className="card span-5 orto-sensors">
-          <div className="card-head">
-            <h3>Misuratori</h3>
-            <span className="eyebrow">WH51 · ×6</span>
-          </div>
-          <SensorList sensors={sensors} thresholds={thresholds} active={active} onSelect={setActive} />
         </div>
       </section>
 

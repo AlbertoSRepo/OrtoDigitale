@@ -355,51 +355,6 @@ button { font-family: inherit; }
 }
 .kv .v { color: var(--ink); font-feature-settings: "tnum"; }
 
-/* ─── Sensor list ───────────────────────────────────────────────────────── */
-
-.sensor-list {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0;
-  background: transparent;
-  border-radius: 0;
-  overflow: hidden;
-  border: 1px solid var(--rule);
-}
-.sensor-list .row {
-  background: transparent;
-  border-right: 1px solid var(--rule);
-  border-bottom: 1px solid var(--rule);
-  padding: 10px 12px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  cursor: pointer;
-  transition: background 140ms var(--ease);
-}
-.sensor-list .row:nth-child(2n) { border-right: 0; }
-.sensor-list .row:nth-last-child(-n+2) { border-bottom: 0; }
-.sensor-list .row:hover, .sensor-list .row.active {
-  background: rgba(93, 131, 72, 0.08);
-}
-.sensor-list .row .swatch {
-  width: 10px; height: 10px;
-  border-radius: 999px;
-  flex: 0 0 auto;
-}
-.sensor-list .row .id {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--ink-3);
-  flex: 1;
-}
-.sensor-list .row .val {
-  font-family: var(--mono);
-  font-feature-settings: "tnum";
-  font-size: 14px;
-  color: var(--ink);
-  font-weight: 500;
-}
 
 /* ─── Period selector ───────────────────────────────────────────────────── */
 
@@ -1255,12 +1210,6 @@ button { font-family: inherit; }
   }
   .live { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; }
   .tab-nav button { padding: 8px 14px; }
-}
-
-/* ─── Orto grid: reorder on narrow viewports ────────────────────────────── */
-@media (max-width: 1100px) {
-  .orto-sensors  { order: 1; }
-  .orto-humidity { order: 2; }
 }
 
 /* tab content fade-in */
