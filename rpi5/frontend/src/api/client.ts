@@ -36,3 +36,7 @@ export function apiGet<T>(path: string, params?: Record<string, string>): Promis
 export function apiPost<T>(path: string, body?: unknown): Promise<T> {
   return request<T>('POST', path, { body });
 }
+
+export function apiPut<T>(path: string, body?: unknown): Promise<T> {
+  return request<T>('PUT', path, { body });
+}

@@ -1,0 +1,19 @@
+# Il progetto viene sviluppato su Windows e deployato su Linux via scp.
+#
+# Con core.autocrlf=true git conserva LF nel repo ma scrive CRLF nella working
+# copy, e lo scp porta quella copia di peso sul Raspberry. JSON e YAML lo
+# tollerano, bash no: uno script con fine riga CRLF fallisce con
+# "$'\r': command not found" alla prima riga.
+#
+# Forzando eol=lf la working copy resta LF, e cio' che si copia sul RPi e'
+# gia' giusto.
+* text=auto eol=lf
+
+# Binari: nessuna conversione.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.woff2 binary
+*.docx binary
+*.crt binary

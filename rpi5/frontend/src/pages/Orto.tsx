@@ -3,7 +3,7 @@ import { useStore } from '../state/store';
 import { useSensorsLast, useSensorsTrend } from '../api/sensors';
 import { useLayout } from '../api/layout';
 import { useWeatherForecast, useWeatherNow } from '../api/weather';
-import { OrtoMap } from '../components/OrtoMap';
+import { OrtoEditor } from '../components/OrtoEditor';
 import { HumidityChart } from '../components/HumidityChart';
 import { WeatherCard } from '../components/WeatherCard';
 import { DateRangePicker } from '../components/DateRangePicker';
@@ -30,7 +30,7 @@ export function Orto() {
     <div className="tab-panel">
       <section className="grid" style={{ marginBottom: 18 }}>
         <div className="span-12">
-          <OrtoMap
+          <OrtoEditor
             layout={layoutQ.data}
             sensors={sensors}
             thresholds={thresholds}

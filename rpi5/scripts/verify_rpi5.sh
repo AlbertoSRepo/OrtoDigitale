@@ -410,6 +410,52 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# [16] Layout orto + bucket events (step 12-13)
+# ---------------------------------------------------------------------------
+section "Layout orto e history spostamenti (step 12-13)"
+
+LAYOUT_JSON=$(curl -sk --max-time 5 --resolve orto.local:443:127.0.0.1 https://orto.local/api/layout 2>/dev/null || true)
+if echo "$LAYOUT_JSON" | grep -q '"file"'; then
+  check_ok "GET /api/layout risponde"
+else
+  check_fail "GET /api/layout non risponde o payload inatteso"
+fi
+
+# Il PUT deve rifiutare un documento invalido: se accettasse tutto, la
+# validazione server-side non starebbe girando.
+PUT_CODE=$(curl -sk --max-time 5 -o /dev/null -w '%{http_code}'   --resolve orto.local:443:127.0.0.1 -X PUT https://orto.local/api/layout   -H 'Content-Type: application/json' -d '{"version":1,"file":[]}' 2>/dev/null || true)
+if [ "$PUT_CODE" = "400" ]; then
+  check_ok "PUT /api/layout rifiuta un documento invalido (400)"
+else
+  check_fail "PUT /api/layout: atteso 400 su documento invalido, ricevuto ${PUT_CODE:-nessuna risposta}"
+fi
+
+if [ -f /opt/orto-digitale/nodered/data/orto_layout.seed.json ]; then
+  check_ok "seed del layout presente sul volume"
+else
+  check_fail "orto_layout.seed.json mancante: GET /api/layout non avrebbe fallback"
+fi
+
+if docker exec nodered printenv INFLUX_TOKEN_NODERED_EVENTS_RW >/dev/null 2>&1; then
+  check_ok "INFLUX_TOKEN_NODERED_EVENTS_RW presente nel container nodered"
+else
+  check_fail "INFLUX_TOKEN_NODERED_EVENTS_RW assente: gli spostamenti sonda non verrebbero registrati"
+fi
+
+if [ -n "${DOCKER_INFLUXDB_INIT_ADMIN_TOKEN:-}" ]; then
+  EV=$(docker exec influxdb influx bucket list --org orto-digitale         --token "$DOCKER_INFLUXDB_INIT_ADMIN_TOKEN" 2>/dev/null | awk '$2=="events"{print $3}')
+  if [ -z "$EV" ]; then
+    check_fail "bucket 'events' assente"
+  elif [ "$EV" = "infinite" ]; then
+    check_ok "bucket 'events' presente con retention infinita"
+  else
+    check_warn "bucket 'events' ha retention $EV: la history degli spostamenti scadra'"
+  fi
+else
+  check_warn "bucket 'events': token admin non disponibile, skip"
+fi
+
+# ---------------------------------------------------------------------------
 # Report finale
 # ---------------------------------------------------------------------------
 echo

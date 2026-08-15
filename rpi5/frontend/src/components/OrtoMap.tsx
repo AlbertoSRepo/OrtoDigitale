@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import type { Layout, LayoutRow, SensorLast } from '../api/types';
-import { FILE_GEOM, crop, cropGlyph, rowLength } from '../config/orto';
+import { FILE_GEOM, crop, rowLength } from '../config/orto';
+import { cropGlyph } from '../config/cropGlyphs';
 import { ACTIVE_SENSORS, SENSOR_LOCATIONS } from '../config/sensors';
 import { humidityColor, type Thresholds } from '../helpers/humidityColor';
 import { moistureBands } from '../helpers/moistureBands';
@@ -10,11 +11,17 @@ import {
 } from '../helpers/ortoMetrics';
 import { useMediaQuery } from '../helpers/useMediaQuery';
 import { fmtRelative } from '../helpers/formatDate';
+import { moveDivider, moveSensor } from '../helpers/layoutOps';
 import probeSvg from '../assets/sensor.svg?raw';
 
 /** Il glifo sonda è vettoriale e monocromatico: si tinge col colore dell'umidità.
  *  Il wrapper <svg> va tolto una volta sola, qui. */
 const PROBE = probeSvg.replace(/^[\s\S]*?<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '');
+
+/** Cosa e' stato colpito col tasto destro: la pagina ci costruisce il menu. */
+export type Bersaglio =
+  | { tipo: 'area'; fila: number; area: number; at: number; clientX: number; clientY: number }
+  | { tipo: 'sonda'; fila: number; sensorId: string; clientX: number; clientY: number };
 
 interface Props {
   layout: Layout | undefined;
@@ -22,6 +29,10 @@ interface Props {
   thresholds: Thresholds;
   activeSensor: string | null;
   onSelectSensor: (id: string | null) => void;
+  /** In editor la mappa diventa interattiva; `layout` e' la bozza. */
+  editing?: boolean;
+  onChange?: (l: Layout) => void;
+  onContext?: (b: Bersaglio) => void;
 }
 
 interface Hover {
@@ -31,10 +42,25 @@ interface Hover {
   y: number;
 }
 
-export function OrtoMap({ layout, sensors, thresholds, activeSensor, onSelectSensor }: Props) {
+export function OrtoMap({
+  layout, sensors, thresholds, activeSensor, onSelectSensor,
+  editing = false, onChange, onContext,
+}: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
   const [hover, setHover] = useState<Hover | null>(null);
   const m = useMediaQuery('(min-width: 900px)') ? DESKTOP : MOBILE;
+
+  /** Da coordinate schermo a frazione [0,1] della fila indicata. */
+  const frazione = (clientX: number, filaId: number) => {
+    const svg = svgRef.current;
+    if (!svg) return 0;
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return 0;
+    const p = new DOMPoint(clientX, 0).matrixTransform(ctm.inverse());
+    const w = (m.proportional ? rowLength(filaId) : 1) * m.vw;
+    return Math.max(0, Math.min(1, p.x / w));
+  };
 
   const byId = useMemo(() => new Map(sensors.map((s) => [s.sensor_id, s])), [sensors]);
 
@@ -46,6 +72,8 @@ export function OrtoMap({ layout, sensors, thresholds, activeSensor, onSelectSen
   return (
     <div className="orto-map" ref={wrapRef}>
       <svg
+        ref={svgRef}
+        className={editing ? 'editing' : undefined}
         viewBox={`${-m.pad} 0 ${m.vw + m.pad * 2} ${totalH}`}
         role="img"
         aria-label="Mappa dell'orto"
@@ -62,11 +90,17 @@ export function OrtoMap({ layout, sensors, thresholds, activeSensor, onSelectSen
             row={row}
             y={rowTop(m, i)}
             m={m}
+            layout={layout}
             byId={byId}
             thresholds={thresholds}
             activeSensor={activeSensor}
             onSelectSensor={onSelectSensor}
+            editing={editing}
+            frazione={frazione}
+            onChange={onChange}
+            onContext={onContext}
             onHover={(h) => {
+              if (editing) return;   // in editor il tooltip darebbe fastidio al drag
               if (!h) return setHover(null);
               const r = wrapRef.current?.getBoundingClientRect();
               if (r) setHover({ ...h, x: h.x - r.left, y: h.y - r.top });
@@ -89,9 +123,17 @@ interface RowProps {
   activeSensor: string | null;
   onSelectSensor: (id: string | null) => void;
   onHover: (h: { sensor: SensorLast; installed: boolean; x: number; y: number } | null) => void;
+  editing: boolean;
+  frazione: (clientX: number, filaId: number) => number;
+  onChange?: (l: Layout) => void;
+  onContext?: (b: Bersaglio) => void;
+  layout?: Layout;
 }
 
-function Row({ row, y, m, byId, thresholds, activeSensor, onSelectSensor, onHover }: RowProps) {
+function Row({
+  row, y, m, byId, thresholds, activeSensor, onSelectSensor, onHover,
+  editing, frazione, onChange, onContext, layout,
+}: RowProps) {
   const w = (m.proportional ? rowLength(row.id) : 1) * m.vw;
   const bands = moistureBands(row.sensori);
 
@@ -145,8 +187,45 @@ function Row({ row, y, m, byId, thresholds, activeSensor, onSelectSensor, onHove
       {/* 3 — aree coltura: divisori + un timbro per area */}
       {aree.map((a, i) => (
         <g key={i}>
+          {editing && (
+            <rect
+              className="orto-hit-area"
+              x={a.from * w}
+              y={y}
+              width={(a.to - a.from) * w}
+              height={m.rowH}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                onContext?.({
+                  tipo: 'area', fila: row.id, area: i,
+                  at: frazione(e.clientX, row.id), clientX: e.clientX, clientY: e.clientY,
+                });
+              }}
+            />
+          )}
           {i < aree.length - 1 && (
             <line className="orto-divider" x1={a.to * w} y1={y} x2={a.to * w} y2={y + m.rowH} />
+          )}
+          {editing && i < aree.length - 1 && layout && onChange && (
+            <rect
+              className="orto-handle-div"
+              x={a.to * w - 9}
+              y={y}
+              width={18}
+              height={m.rowH}
+              onPointerDown={(e) => {
+                e.preventDefault();
+                (e.target as Element).setPointerCapture(e.pointerId);
+                const muovi = (ev: PointerEvent) =>
+                  onChange(moveDivider(layout, row.id, i, frazione(ev.clientX, row.id)));
+                const su = () => {
+                  window.removeEventListener('pointermove', muovi);
+                  window.removeEventListener('pointerup', su);
+                };
+                window.addEventListener('pointermove', muovi);
+                window.addEventListener('pointerup', su);
+              }}
+            />
           )}
           <CropStamp
             area={a}
@@ -166,6 +245,11 @@ function Row({ row, y, m, byId, thresholds, activeSensor, onSelectSensor, onHove
         w={w}
         pinY={pinY(m, y)}
         m={m}
+        editing={editing}
+        frazione={frazione}
+        onChange={onChange}
+        onContext={onContext}
+        layout={layout}
         byId={byId}
         thresholds={thresholds}
         activeSensor={activeSensor}
@@ -178,7 +262,10 @@ function Row({ row, y, m, byId, thresholds, activeSensor, onSelectSensor, onHove
 
 type PinsProps = Omit<RowProps, 'y'> & { w: number; pinY: number };
 
-function Pins({ row, w, pinY, m, byId, thresholds, activeSensor, onSelectSensor, onHover }: PinsProps) {
+function Pins({
+  row, w, pinY, m, byId, thresholds, activeSensor, onSelectSensor, onHover,
+  editing, frazione, onChange, onContext, layout,
+}: PinsProps) {
   // Posizionamento prima, collisioni verticali dopo: il lato su cui finisce
   // l'etichetta dipende dal bordo della riga, e va deciso per primo.
   const posate = [...row.sensori]
@@ -226,6 +313,29 @@ function Pins({ row, w, pinY, m, byId, thresholds, activeSensor, onSelectSensor,
             onMouseLeave={() => {
               onHover(null);
               onSelectSensor(null);
+            }}
+            onContextMenu={(e) => {
+              if (!editing) return;
+              e.preventDefault();
+              e.stopPropagation();
+              onContext?.({
+                tipo: 'sonda', fila: row.id, sensorId: it.p.sensor_id,
+                clientX: e.clientX, clientY: e.clientY,
+              });
+            }}
+            onPointerDown={(e) => {
+              if (!editing || !layout || !onChange) return;
+              e.preventDefault();
+              e.stopPropagation();
+              (e.target as Element).setPointerCapture(e.pointerId);
+              const muovi = (ev: PointerEvent) =>
+                onChange(moveSensor(layout, it.p.sensor_id, row.id, frazione(ev.clientX, row.id)));
+              const su = () => {
+                window.removeEventListener('pointermove', muovi);
+                window.removeEventListener('pointerup', su);
+              };
+              window.addEventListener('pointermove', muovi);
+              window.addEventListener('pointerup', su);
             }}
           >
             <g
