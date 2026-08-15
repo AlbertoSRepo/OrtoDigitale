@@ -490,4 +490,43 @@ Da applicare **nello stesso commit** dell'implementazione:
 
 ## Implementazione
 
-**Stato:** ⏳ DA IMPLEMENTARE
+**Stato:** 🟡 IMPLEMENTATO E DEPLOYATO — verifica a mano dell'editor da fare
+**Commit:** `feat(nodered): PUT /api/layout...` (50e8077), `feat(frontend): editor del layout orto` (2376035)
+
+### Verificato
+
+Backend, con `rpi5/nodered/test/put_layout.test.mjs` — 24 controlli che eseguono il
+corpo del nodo **letto da `flows.json`**, con filesystem finto: validazione (tutti gli
+11 codici), scrittura atomica, `.bak`, `updated_at` imposto dal server, e le quattro
+azioni del diff. Poi sul RPi vero: `place` ×4 al primo salvataggio, `move` con
+`from_x`/`to_x` corretti, `400` con `area_too_narrow` su documento invalido.
+
+Frontend, con `layoutOps.test.ts` — 19 controlli sulle operazioni pure, fra cui uno
+che spazza 200 posizioni di divisorio verificando che **nessuna** produca un layout
+invalido. In totale il progetto ha 41 test.
+
+`verify_rpi5.sh` sezione [16]: GET, PUT che rifiuta, seed presente, token nel
+container, bucket con retention infinita. Healthcheck completo **TUTTO OK**.
+
+### NON verificato
+
+L'editor **non è mai stato usato a mano**: l'estensione Chrome non è collegata in
+questa sessione. Trascinamento divisori e sonde, menu contestuale, Salva/Annulla e
+l'avviso di riassegnazione hanno il typecheck e la logica sotto test, ma nessuno li
+ha ancora toccati col mouse.
+
+### Deviazioni dalla spec
+
+| Deviazione | Motivo |
+|---|---|
+| Scrittura su `events` via `http request` + `env.get()`, non con un secondo `influxdb out` | `cfg-influxdb` tiene il token in `flows_cred.json`, che ogni redeploy di `flows.json` svuota. Preso da `.env` il token non è una credenziale Node-RED e nessun redeploy può cancellarlo |
+| Menu contestuale a un livello, senza sottomenu `▸` | Le voci di scelta stanno in linea sotto un'intestazione: un gesto in meno e molto meno codice |
+| `sensor_id` validato server-side contro tutti e sei i WH51, non contro `ACTIVE_SENSORS` | Il confine di fiducia è "è un sensore vero"; quali siano installati è politica di prodotto, e cablarla nel backend richiederebbe di toccarlo quando 05/06 verranno installati. Il dropdown resta ristretto ad `ACTIVE_SENSORS` |
+| `OrtoMap/` cartella → `OrtoMap.tsx` + `OrtoEditor.tsx` + `ContextMenu.tsx` + `helpers/layoutOps.ts` | La mappa era già un file solo dallo step 12; la logica pura sta nei helper perché lì i test la raggiungono |
+| `config/orto.ts` diviso, glifi in `config/cropGlyphs.ts` | `import.meta.glob` è solo-Vite e impediva a `node --test` di caricare la config |
+
+### Da fare
+
+1. Usare l'editor davvero: dividere, unire, cambiare coltura, trascinare, salvare.
+2. Controllare che uno spostamento reale finisca in `sensor_moves`.
+3. Marcare COMPLETATO e aggiornare `CLAUDE.md` §Stato avanzamento.
