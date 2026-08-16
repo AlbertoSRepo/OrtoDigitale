@@ -45,8 +45,10 @@ function oggiAlle(hh, mm = 0) {
   return d.getTime();
 }
 
+// `registra_regole: false` costruisce un global senza orto_rules, per
+// esercitare il decision loop quando la libreria non e' stata registrata.
 function banco({ umidita = [], now = oggiAlle(6, 30), cfg = CFG, meteo = null,
-                 last_irrigation_at = 0, reachable = true } = {}) {
+                 last_irrigation_at = 0, reachable = true, registra_regole = true } = {}) {
   const store = {
     irrigation_config: JSON.parse(JSON.stringify(cfg)),
     soil_moisture_cache: Object.fromEntries(umidita.map((v, i) => [`WH51_0${i + 1}`, { value: v, ts: now - 60000 }])),
@@ -66,7 +68,7 @@ function banco({ umidita = [], now = oggiAlle(6, 30), cfg = CFG, meteo = null,
   // del flow: il banco fa lo stesso, altrimenti il decision loop si troverebbe
   // senza. Finche' `nr-fn-lib` non esiste la riga e' un no-op, per questo i 12
   // casi qui sotto valgono identici da una parte e dall'altra dell'estrazione.
-  const lib = nodoPerId('nr-fn-lib');
+  const lib = registra_regole ? nodoPerId('nr-fn-lib') : null;
   if (lib) lib({}, h.node, h.global, h.env, h.fs);
   return h;
 }
@@ -230,6 +232,60 @@ await t('valutaRegole riporta la regola bloccante, non solo l azione', async () 
   });
   assert.equal(r.azione, 'attendi');
   assert.equal(r.regola, 'out_of_window');
+});
+
+console.log('\n— cablaggio al boot e guardie —');
+
+// Cercato per cablaggio e non per id: cio' che conta e' che qualcosa registri
+// le regole al boot, non come si chiama.
+function injectDiBoot() {
+  const inj = flows.find((n) => n.type === 'inject' && n.z === 'f-decision'
+    && Array.isArray(n.wires) && (n.wires[0] || []).includes('nr-fn-lib'));
+  assert.ok(inj, 'nessun inject cablato su nr-fn-lib: al boot le regole non verrebbero registrate');
+  return inj;
+}
+
+await t('un inject fa registrare le regole all avvio del flow', async () => {
+  const inj = injectDiBoot();
+  assert.equal(inj.once, true, 'l inject deve partire da solo all avvio, senza che nessuno lo prema');
+  const lib = flows.find((n) => n.id === 'nr-fn-lib');
+  assert.equal(lib.z, inj.z, 'inject e libreria devono stare nello stesso tab');
+});
+
+await t('la libreria si registra prima del primo tick di decisione', async () => {
+  const inj = injectDiBoot();
+  const tick = flows.find((n) => n.id === 'nd-inject-tick');
+  assert.ok(Number(inj.onceDelay) < Number(tick.onceDelay),
+    `le regole arrivano a +${inj.onceDelay}s ma si decide gia a +${tick.onceDelay}s`);
+});
+
+await t('senza orto_rules il decision loop non decide e avvisa', async () => {
+  const now = oggiAlle(6, 30);
+  const h = banco({ umidita: [30, 32], now, registra_regole: false });
+  const out = await decidi(h, now);
+  assert.equal(out, null, 'senza regole non deve uscire nulla, men che meno un ON');
+  assert.equal(h.store.last_decision_outcome, undefined, 'non deve registrare alcun esito');
+  assert.ok(h.warns.some((w) => /orto_rules/.test(w)),
+    `atteso un warn su orto_rules, visti: ${JSON.stringify(h.warns)}`);
+});
+
+await t('un verdetto non riconosciuto non apre la valvola', async () => {
+  const now = oggiAlle(6, 30);
+  const h = banco({ umidita: [30, 32], now, registra_regole: false });
+  h.store.orto_rules = { valutaRegole: () => ({ azione: 'blocca', regola: 'regola_futura', motivo: 'ignota' }) };
+  const out = await decidi(h, now);
+  assert.equal(out, null, 'un azione che non e ne apri ne attendi non deve aprire');
+  assert.ok(!/^open:/.test(h.store.last_decision_outcome || ''),
+    `non deve registrare un apertura, invece: ${h.store.last_decision_outcome}`);
+});
+
+await t('un apri senza trigger non apre la valvola', async () => {
+  const now = oggiAlle(6, 30);
+  const h = banco({ umidita: [30, 32], now, registra_regole: false });
+  h.store.orto_rules = { valutaRegole: () => ({ azione: 'apri', regola: 'open', motivo: 'boh' }) };
+  const out = await decidi(h, now);
+  assert.equal(out, null, 'senza trigger riconosciuto non deve aprire');
+  assert.equal(h.store.last_decision_outcome, undefined, 'niente open:undefined@...');
 });
 
 console.log(`\n${ok} passati, ${ko} falliti`);
