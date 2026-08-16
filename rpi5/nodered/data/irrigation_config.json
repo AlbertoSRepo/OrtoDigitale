@@ -43,9 +43,9 @@
     "recompute_interval_seconds": 300,
     "stats_refresh_interval_seconds": 3600,
     "stats_window_days": 7,
-    "k_pct_per_mm": null,
-    "k_pct_per_mm_p10": null,
-    "k_pct_per_mm_p90": null,
+    "k_pct_per_mm": 1.296,
+    "k_pct_per_mm_p10": 0.256,
+    "k_pct_per_mm_p90": 4.593,
     "rain_gain_pct_per_mm": 1.2,
     "fallback_drying_rate_pct_h": 0.5
   },

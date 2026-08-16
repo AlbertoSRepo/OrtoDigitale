@@ -62,7 +62,10 @@ await t('il file di config ha la sezione forecast completa', async () => {
     'fallback_drying_rate_pct_h']) {
     assert.ok(k in CFG.forecast, `manca forecast.${k}`);
   }
-  assert.equal(CFG.forecast.k_pct_per_mm, null, 'k deve partire null finche non e stimato');
+  assert.ok(
+    CFG.forecast.k_pct_per_mm === null || Number.isFinite(CFG.forecast.k_pct_per_mm),
+    'k deve essere null (non ancora stimato) o un numero finito (stimato offline, vedi analysis/03_stima_asciugatura.md)',
+  );
 });
 
 await t('si puo impostare forecast.horizon_hours via HTTP', async () => {
