@@ -117,11 +117,50 @@ await t('le finestre sporcate da irrigazione sono escluse', async () => {
     `la finestra contaminata non ha escluso nulla: ${s.samples} campioni contro ${pulito.store.drying_stats.samples} puliti`);
 });
 
+await t('un buco nella serie viene saltato, non mediato', async () => {
+  // Scenario di controllo: stessa serie, nessun buco. Serve per sapere quanti
+  // campioni ci si aspetta SENZA il salto, e verificare che il buco ne tolga
+  // esattamente uno (la coppia a cavallo del salto), non zero.
+  const pulito = banco({ tmp_moisture_series: serieInCalo() });
+  await statistiche({ payload: [] }, pulito.node, pulito.global, pulito.env, pulito.fs);
+  const campioniSenzaBuco = pulito.store.drying_stats.samples;
+
+  const serie = serieInCalo();
+  const buco = Math.floor(serie.length / 2);
+  const spostamento = 3 * 3600000; // 3h: ben oltre i 30 min che segnano un buco
+  for (let i = buco; i < serie.length; i++) {
+    serie[i]._time = new Date(new Date(serie[i]._time).getTime() + spostamento).toISOString();
+  }
+  const h = banco({ tmp_moisture_series: serie });
+  await statistiche({ payload: [] }, h.node, h.global, h.env, h.fs);
+  const s = h.store.drying_stats;
+  assert.ok(s, 'drying_stats non scritte');
+  // Se il buco venisse mediato invece che saltato, il conteggio tornerebbe
+  // uguale a quello senza buco: qui deve mancare esattamente un campione.
+  assert.equal(s.samples, campioniSenzaBuco - 1,
+    `il buco doveva togliere esattamente un campione: ${campioniSenzaBuco} senza buco, ${s.samples} con buco`);
+  assert.ok(Math.abs(s.rate_pct_h - 0.5) < 0.05, `attesa ~0.5 %/h, ottenuta ${s.rate_pct_h}`);
+});
+
 await t('serie troppo corta: nessuna statistica, nessun crash', async () => {
   const h = banco({ tmp_moisture_series: serieInCalo(1) });
   await statistiche({ payload: [] }, h.node, h.global, h.env, h.fs);
   const s = h.store.drying_stats;
-  assert.ok(s === undefined || s.samples < 10, 'con pochi dati non deve pubblicare una stima');
+  assert.equal(s, undefined, 'con pochi dati non deve pubblicare una stima');
+});
+
+await t('tutti i campioni dentro la finestra contaminata: nessuna stima (non e scarsita di dati grezzi)', async () => {
+  // 96 punti, ben oltre MIN_CAMPIONI: qui il problema non e' avere pochi
+  // dati grezzi (come nel test precedente), ma che ogni singolo punto cade
+  // dentro la finestra contaminata di un evento che dura quanto l intera
+  // serie: nessuna coppia pulita sopravvive.
+  const serie = serieInCalo();
+  const chiusura = new Date(serie[serie.length - 1]._time).toISOString();
+  const durata = 24 * 3600; // dura quanto la serie: [apertura-30min, chiusura+3h] la copre tutta
+  const h = banco({ tmp_moisture_series: serie });
+  await statistiche({ payload: [{ _time: chiusura, _value: durata }] }, h.node, h.global, h.env, h.fs);
+  const s = h.store.drying_stats;
+  assert.equal(s, undefined, 'con tutti i campioni contaminati non deve pubblicare una stima');
 });
 
 console.log(`\n${ok} passati, ${ko} falliti`);
