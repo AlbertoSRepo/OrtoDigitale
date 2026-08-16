@@ -198,7 +198,11 @@ CFG_K.forecast.k_pct_per_mm_p10 = 1.2;
 CFG_K.forecast.k_pct_per_mm_p90 = 3.0;
 
 function bancoSim({ umidita = [30, 32], now = Date.now(), meteo = true, cfg = CFG_K,
-                    last_irrigation_at = 0, stats = { rate_pct_h: 0.5, p10: 0.3, p90: 0.8, samples: 200, computed_at: Date.now() },
+                    // computed_at ancorato a `now` (non a Date.now() reale): stesso
+                    // difetto di ancoraggio gia' corretto in curva(), qui lasciato a
+                    // meta'. Con Date.now() reale, "quanto sono fresche le statistiche"
+                    // dipende dall ora di esecuzione del test invece che dallo scenario.
+                    last_irrigation_at = 0, stats = { rate_pct_h: 0.5, p10: 0.3, p90: 0.8, samples: 200, computed_at: now },
                     pioggiaOra = {} } = {}) {
   const h = banco({
     soil_moisture_cache: Object.fromEntries(umidita.map((v, i) => [`WH51_0${i + 1}`, { value: v, ts: now - 60000 }])),
@@ -227,6 +231,10 @@ await t('terreno secco dentro la finestra: apre subito', async () => {
   assert.ok(f.next_irrigation, 'nessuna previsione prodotta');
   assert.ok(Math.abs(new Date(f.next_irrigation.predicted_at).getTime() - now) < 20 * 60000);
   assert.equal(f.next_irrigation.expected_duration_seconds, 900);
+  // Apertura al primissimo passo: nessuna regola ha mai bloccato, quindi
+  // limiting_rule non deve essere la stringa 'open' (non e' una regola
+  // bloccante e il frontend non avrebbe una voce per tradurla) ma null.
+  assert.equal(f.next_irrigation.limiting_rule, null);
 });
 
 await t('secco ma fuori finestra: la regola limitante e out_of_window', async () => {
@@ -347,6 +355,17 @@ await t('quorum insufficiente: nessuna previsione, motivo no_quorum', async () =
   assert.equal(f.no_irrigation_reason, 'no_quorum');
 });
 
+await t('nessuna sonda valida: nessuna previsione, motivo no_quorum', async () => {
+  const now = oggiAlle(6, 30);
+  const h = bancoSim({ umidita: [], now });
+  await simula(h, now);
+  const f = h.store.irrigation_forecast;
+  assert.equal(f.next_irrigation, null);
+  assert.equal(f.no_irrigation_reason, 'no_quorum');
+  assert.equal(f.current.moisture_mean, null, 'senza sonde la media non puo essere un numero');
+  assert.equal(f.current.sensor_count, 0);
+});
+
 await t('sistema in pausa: motivo paused', async () => {
   const now = oggiAlle(6, 30);
   const cfg = JSON.parse(JSON.stringify(CFG)); cfg.mode = 'paused';
@@ -355,17 +374,68 @@ await t('sistema in pausa: motivo paused', async () => {
   assert.equal(h.store.irrigation_forecast.no_irrigation_reason, 'paused');
 });
 
-await t('la fascia contiene la stima centrale ed e ordinata', async () => {
+await t('cooldown per tutto l orizzonte (orizzonte breve): motivo cooldown, non moisture_sufficient', async () => {
+  // La mappa di no_irrigation_reason scartava cooldown e out_of_window,
+  // facendoli ricadere su moisture_sufficient (un motivo falso). Orizzonte
+  // accorciato a 1h e cooldown di 3h: dentro la finestra mattutina, blocca
+  // solo il cooldown per l intera simulazione, mai altro.
+  const now = oggiAlle(6, 30);
+  const cfg = JSON.parse(JSON.stringify(CFG_K));
+  cfg.forecast.horizon_hours = 1;
+  cfg.irrigation.cooldown_seconds = 3 * 3600;
+  const h = bancoSim({ umidita: [30, 30], now, cfg, last_irrigation_at: now - 3600000 });
+  await simula(h, now);
+  const f = h.store.irrigation_forecast;
+  assert.equal(f.next_irrigation, null);
+  assert.equal(f.no_irrigation_reason, 'cooldown');
+});
+
+await t('fuori finestra per tutto l orizzonte (orizzonte breve): motivo out_of_window, non moisture_sufficient', async () => {
+  // Stesso principio del caso precedente, ma per out_of_window: orizzonte di
+  // 2h subito dopo la chiusura della finestra mattutina, troppo corto per
+  // rientrare in una finestra qualsiasi.
+  const now = oggiAlle(8, 1);
+  const cfg = JSON.parse(JSON.stringify(CFG_K));
+  cfg.forecast.horizon_hours = 2;
+  const h = bancoSim({ umidita: [30, 30], now, cfg });
+  await simula(h, now);
+  const f = h.store.irrigation_forecast;
+  assert.equal(f.next_irrigation, null);
+  assert.equal(f.no_irrigation_reason, 'out_of_window');
+});
+
+await t('la fascia contiene la stima centrale in senso stretto', async () => {
+  // Non e' avvolta in "if (n)": la previsione deve esistere, e la
+  // disuguaglianza e' stretta. Con <= e con l'ottimistico scartato quando
+  // non attraversa, l asserzione era vera per costruzione (a === c === b
+  // passava comunque): qui deve essere davvero a < c < b.
   const now = oggiAlle(6, 30);
   const h = bancoSim({ umidita: [55, 55], now });
   await simula(h, now);
   const n = h.store.irrigation_forecast.next_irrigation;
-  if (n) {
-    const a = new Date(n.band_start).getTime();
-    const c = new Date(n.predicted_at).getTime();
-    const b = new Date(n.band_end).getTime();
-    assert.ok(a <= c && c <= b, `fascia incoerente: ${n.band_start} / ${n.predicted_at} / ${n.band_end}`);
-  }
+  assert.ok(n, 'attesa una previsione');
+  const a = new Date(n.band_start).getTime();
+  const c = new Date(n.predicted_at).getTime();
+  const b = new Date(n.band_end).getTime();
+  assert.ok(a < c && c < b, `fascia degenere o incoerente: ${n.band_start} / ${n.predicted_at} / ${n.band_end}`);
+});
+
+await t('ottimistico oltre l orizzonte: band_end resta al bordo e si dichiara aperto', async () => {
+  const now = oggiAlle(6, 30);
+  // k al p10 -> 0.3 %/h di giorno (~3.9 punti/die): da 55% servono quasi 4
+  // giorni per scendere sotto 40, piu dell orizzonte di 72h. Lo scenario
+  // ottimistico non attraversa mai: e' l incertezza piu ampia possibile, non
+  // un dato assente da scartare. band_end deve fermarsi al bordo
+  // dell orizzonte, non collassare sulla stima centrale, e band_end_open lo
+  // deve dichiarare.
+  const h = bancoSim({ umidita: [55, 55], now });
+  await simula(h, now);
+  const n = h.store.irrigation_forecast.next_irrigation;
+  assert.ok(n, 'attesa una previsione');
+  assert.equal(n.band_end_open, true,
+    'l ottimistico non attraversa entro 72h: band_end deve dichiararsi aperto');
+  assert.equal(new Date(n.band_end).getTime(), now + 72 * 3600000,
+    'band_end deve fermarsi esattamente al bordo dell orizzonte, non scartare lo scenario ottimistico');
 });
 
 await t('sonde in disaccordo: confidenza piu bassa', async () => {
@@ -376,12 +446,34 @@ await t('sonde in disaccordo: confidenza piu bassa', async () => {
   assert.ok(f.confidence.reasons.some((r) => /disaccordo/i.test(r)));
 });
 
+await t('valvola irraggiungibile ora: la confidenza scende', async () => {
+  // valve_reachable e' cablato a true DENTRO la simulazione (giusto: e' il
+  // futuro simulato), ma lo stato attuale della valvola deve comunque
+  // riflettersi sulla confidenza dichiarata, come previsto dalla tabella
+  // delle assunzioni della spec.
+  const now = oggiAlle(6, 30);
+  const h = bancoSim({ umidita: [30, 32], now });
+  h.store.valve_reachable = false;
+  await simula(h, now);
+  const f = h.store.irrigation_forecast;
+  assert.ok(f.confidence.level < 4, `attesa una confidenza abbassata, ottenuta ${f.confidence.level}`);
+  assert.ok(f.confidence.reasons.some((r) => /valvola/i.test(r)), 'manca il motivo relativo alla valvola');
+});
+
 await t('il point per InfluxDB esce come secondo output', async () => {
   const now = oggiAlle(6, 30);
   const h = bancoSim({ umidita: [30, 32], now });
   const out = await simula(h, now);
   assert.ok(Array.isArray(out), 'attesi due output');
   assert.equal(out[1].measurement, 'irrigation_forecast');
+  // I nomi dei campi contano quanto i loro valori: in questo stesso task un
+  // disallineamento di nome (rain_24h vs mm) aveva gia' azzerato in silenzio
+  // una regola intera. Qui si assicurano i sei campi esatti, non solo il
+  // conteggio.
+  assert.deepEqual(Object.keys(out[1].payload[0]).sort(), [
+    'band_high_seconds', 'band_low_seconds', 'confidence_level',
+    'drying_rate_pct_h', 'moisture_mean', 'seconds_until_next',
+  ]);
   assert.equal(out[1].payload[1].method, 'et0');
 });
 

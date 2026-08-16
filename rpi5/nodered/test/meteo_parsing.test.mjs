@@ -158,7 +158,7 @@ await t('nessuna ora contiene l istante corrente: cache preesistente intatta e w
   assert.ok(h.warns.some((w) => w.includes('istante corrente')), 'deve avvisare che l indice orario non e stato trovato');
 });
 
-await t('l URL chiede et0, 4 giorni e unixtime', async () => {
+await t('l URL chiede et0, 5 giorni e unixtime', async () => {
   const h = banco();
   h.store.irrigation_config = {
     weather: { polling_interval_seconds: 1800, api_url: 'https://api.open-meteo.com/v1/forecast', lat: 45.7, lon: 9.7 },
@@ -167,7 +167,13 @@ await t('l URL chiede et0, 4 giorni e unixtime', async () => {
   const msg = await esegui(scheduler, {}, h, ora);
   assert.ok(msg && msg.url, 'lo scheduler non ha prodotto un URL');
   assert.ok(msg.url.includes('et0_fao_evapotranspiration'), 'manca et0');
-  assert.ok(msg.url.includes('forecast_days=4'), 'servono 4 giorni per la finestra pioggia a +72h');
+  // Open-Meteo conta i giorni da mezzanotte, il simulatore ha bisogno di 96h
+  // (72 di orizzonte + 24 di finestra pioggia in coda) da qualunque ora di
+  // polling: 4 giorni bastano solo se il polling cade esattamente a
+  // mezzanotte, altrimenti la coda dell orizzonte resta cieca alla pioggia
+  // (stesso modo di fallire, senza errori, della chiave rain_24h). 5 giorni
+  // (120 slot da mezzanotte) coprono le 96h da qualunque ora.
+  assert.ok(msg.url.includes('forecast_days=5'), 'servono 5 giorni per coprire 96h da qualunque ora di polling');
   assert.ok(msg.url.includes('timeformat=unixtime'), 'manca timeformat=unixtime');
 });
 
