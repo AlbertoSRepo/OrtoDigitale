@@ -101,9 +101,36 @@ WH51_03 **non è una sonda guasta**: su 10 giorni è la più variabile delle qua
 (dev. std 7.15, contro 4.33 / 4.88 / 5.86 delle altre). La distribuzione dell'acqua
 è irregolare **per singolo evento**, non c'è una zona morta fissa.
 
+### Un bug in produzione nel parsing meteo (rilevato in fase di pianificazione)
+
+Gli array orari di Open-Meteo **partono da mezzanotte del giorno corrente** nel
+fuso richiesto, non dall'ora corrente. Verificato con chiamata reale il 2026-08-16:
+
+```
+hourly.time[0] = "2026-08-16T00:00"      utc_offset_seconds = 7200
+```
+
+Il nodo `parse + cache + influx point` indicizza invece per posizione
+(`precip.slice(0, 24)`, `hum[0]`, `temp.slice(0, 12)`), assumendo che l'indice 0
+sia «adesso». Ne consegue che, in produzione:
+
+| Campo | Significato inteso | Significato reale |
+|---|---|---|
+| `precip_next_24h_mm` | pioggia nelle prossime 24 h | pioggia **di oggi da mezzanotte**, in gran parte già caduta |
+| `humidity_now_pct` | umidità corrente | umidità **a mezzanotte** |
+| `temp_max_next_12h_c` | massima nelle prossime 12 h | massima fra 00:00 e 12:00 — **perde sempre il picco pomeridiano** |
+
+La regola 6 (`rain_delay`) del decision loop decide quindi sulla pioggia **già
+caduta** invece che su quella prevista, e il difetto è attivo da quando `mode=auto`
+è stato acceso.
+
+**La correzione rientra in questo step** perché ne è comunque un prerequisito: il
+simulatore deve poter mappare un istante futuro su una posizione dell'array, il che
+richiede `hourly.time`. Vedi Task 1 del piano di implementazione.
+
 ### Conseguenze per questo step
 
-Nessuna: tutto il modello di questo step riguarda l'**asciugatura**, che si misura
+Il modello di questo step riguarda l'**asciugatura**, che si misura
 sulle serie grezze di `soil_moisture` (1 punto/minuto per sonda, integre). I campi
 derivati rotti riguardano la **bagnatura**, che è materia dello step 16.
 
@@ -175,11 +202,17 @@ inventata a tavolino.
 Se il simulatore riscrivesse la catena di regole per conto suo, il giorno che una
 soglia cambia in un posto solo la previsione comincerebbe a mentire in silenzio.
 
-Le regole vengono estratte in `rpi5/nodered/data/node_modules/orto-rules/`, funzione
-pura `valutaRegole(stato) → {azione, motivo}`, richiesta via `require('orto-rules')`
-sia da `decision logic` sia dal simulatore. Sta in `node_modules` perché è l'unico
-percorso da cui i function node di Node-RED possono fare `require` per nome; resta
-un file del repo, versionato e testabile con `node --test`.
+Le regole vengono estratte in un **function node dedicato di `flows.json`**
+(`libreria regole`, id `nr-fn-lib`), che all'avvio registra
+`global.set('orto_rules', { valutaRegole })`. Sia `decision logic` sia il
+simulatore leggono la funzione da lì.
+
+> **Correzione rispetto alla prima stesura di questa spec.** Era previsto un
+> modulo in `rpi5/nodered/data/node_modules/orto-rules/` richiesto via `require`.
+> Non è praticabile: `rpi5/nodered/data/node_modules/` è in `.gitignore`, quindi il
+> modulo non sarebbe stato versionato. La soluzione qui sopra tiene tutto in
+> `flows.json`, che `CLAUDE.md` indica già come source of truth, e si appoggia al
+> banco di prova che il progetto usa dallo step 13 (vedi §11).
 
 **Il refactor tocca codice in produzione da un giorno.** Sequenza obbligata:
 
@@ -300,9 +333,16 @@ un sistema che non esiste.
 ### Interfaccia
 
 ```js
-// orto-rules/index.js
+// registrata da `libreria regole` in global.orto_rules
 valutaRegole(stato) → { azione, motivo, regola }
 ```
+
+Ordine di avvio: `libreria regole` è alimentato da un `inject` con
+`once: true`, quindi la registrazione avviene all'avvio del flow, ben prima del
+primo tick del decision loop. Entrambi i consumatori devono comunque
+**verificare la presenza** di `global.orto_rules` e, se assente, non decidere
+nulla e loggare un warn — mai ricadere su una copia locale delle regole, che
+reintrodurrebbe la divergenza che questo design elimina.
 
 `stato` è un oggetto puro, senza accesso a context o a I/O:
 
@@ -380,11 +420,20 @@ già in memoria e gira ogni 5 minuti, allineata al decision loop.
 
 ### Modifica al flow meteo esistente
 
-Nel tab *Weather (Open-Meteo)*, il nodo `GET Open-Meteo` aggiunge
-`et0_fao_evapotranspiration` ai parametri `hourly`. Il nodo `parse + cache + influx
-point` conserva in `global.weather_cache` le curve orarie `precipitation` ed `et0`
-oltre agli aggregati già presenti. **Il punto scritto su InfluxDB non cambia**: solo
-aggregati, come da D5.
+Nel tab *Weather (Open-Meteo)*, il nodo `scheduler` costruisce l'URL con tre
+modifiche:
+
+| Parametro | Da | A | Perché |
+|---|---|---|---|
+| `hourly` | `precipitation,temperature_2m,relative_humidity_2m` | `…,et0_fao_evapotranspiration` | serve l'ET0 per il modello |
+| `forecast_days` | `2` | `4` | al passo simulato a +72 h serve la somma pioggia fino a +96 h |
+| `timeformat` | *(assente)* | `unixtime` | allinea gli indici a istanti assoluti senza ambiguità di fuso fra host e container |
+
+Il nodo `parse + cache + influx point` viene corretto (indicizzazione a partire
+dall'ora corrente, non dalla posizione 0) e conserva in `global.weather_cache` le
+curve orarie `precipitation` ed `et0` con il vettore `time`, oltre agli aggregati
+già presenti. **Il punto scritto su InfluxDB non cambia**: solo aggregati, come da
+D5.
 
 ### Measurement `irrigation_forecast`
 
@@ -453,6 +502,12 @@ Quando non si prevede alcuna irrigazione entro l'orizzonte:
 
 Valori ammessi per `no_irrigation_reason`: `moisture_sufficient`, `rain_forecast`,
 `paused`, `no_quorum`.
+
+Entro 72 h possono bloccare regole diverse in momenti diversi. Si riporta **la più
+informativa, non l'ultima incontrata**, secondo la priorità fissa
+`paused` > `no_quorum` > `rain_delay` > `moisture_sufficient` > `cooldown` >
+`out_of_window`. Se piove per tre giorni e nel frattempo il terreno resta bagnato,
+entrambe le condizioni sono vere: dire «piove» spiega di più che dire «è bagnato».
 
 `expected_duration_seconds` vale `safety_timeout_seconds` per `trigger: "auto"` e
 `emergency_duration_seconds` per `trigger: "emergency"`.
@@ -548,9 +603,18 @@ mai una previsione muta che potrebbe essere di ieri.
 
 ## 11. Test e validazione
 
-### Test unitari (`node --test`, come gli helper del frontend)
+### Test unitari — banco di prova su `flows.json`
 
-**`orto-rules`** — test di fotografia del comportamento attuale, più i casi limite:
+Si adotta il pattern già in uso dallo step 13 (`rpi5/nodered/test/put_layout.test.mjs`,
+`rpi5/nodered/test/registro_sensori.test.mjs`): il test **legge il corpo della
+funzione da `flows.json`**, lo compila con `new AsyncFunction` e lo esegue contro un
+banco con `global`, `node`, `env`, `fs` simulati. Si esegue con
+`node rpi5/nodered/test/<nome>.test.mjs` ed esce con codice 1 se qualcosa fallisce.
+
+Il vantaggio rispetto a un modulo separato è che non esiste una copia del codice da
+tenere allineata: ciò che passa il test è letteralmente ciò che gira sul Raspberry.
+
+**`libreria regole`** — test di fotografia del comportamento attuale, più i casi limite:
 
 - emergenza sotto `soglia_emergenza_pct` che scavalca la finestra oraria
 - finestra serale che attraversa la mezzanotte (regressione del commit `696ace5`)
@@ -603,17 +667,17 @@ accumula da sola.
 
 | File | Modifica |
 |---|---|
-| `rpi5/nodered/data/node_modules/orto-rules/index.js` | **nuovo** — catena di regole pura |
-| `rpi5/nodered/data/node_modules/orto-rules/package.json` | **nuovo** |
-| `rpi5/nodered/data/node_modules/orto-rules/index.test.js` | **nuovo** — fotografia + casi limite |
-| `rpi5/nodered/data/node_modules/orto-forecast/index.js` | **nuovo** — proiezione e simulazione |
-| `rpi5/nodered/data/node_modules/orto-forecast/index.test.js` | **nuovo** |
-| `rpi5/nodered/data/flows.json` | nuovo tab previsione; `decision logic` passa a `require('orto-rules')`; flow meteo estende query e cache |
+| `rpi5/nodered/test/regole_irrigazione.test.mjs` | **nuovo** — fotografia + casi limite della catena di regole |
+| `rpi5/nodered/test/previsione.test.mjs` | **nuovo** — proiezione e simulazione |
+| `rpi5/nodered/data/flows.json` | nuovo nodo `libreria regole`; nuovo tab previsione; `decision logic` passa a `global.orto_rules`; flow meteo corretto (indicizzazione oraria) ed esteso (curve orarie, `forecast_days=4`) |
 | `rpi5/nodered/data/irrigation_config.json` | sezione `forecast` |
 | `rpi5/frontend/src/api/forecast.ts` | **nuovo** |
 | `rpi5/frontend/src/components/NextIrrigationCard.tsx` | **nuovo** |
 | `rpi5/frontend/src/pages/Waterflow.tsx` | inserimento della card |
 | `rpi5/frontend/src/api/types.ts` | tipi della risposta forecast |
+| `rpi5/frontend/src/helpers/formatDuration.ts` | `fmtFraQuanto` — `fmtRelative` guarda al passato e non serve qui |
+| `rpi5/frontend/src/helpers/formatDuration.test.ts` | **nuovo** |
+| `analysis/stima_k.mjs` | **nuovo** — script una-tantum del fitting e del backtest |
 | `analysis/03_stima_asciugatura.md` | **nuovo** — fitting di `k` e tabella degli errori |
 | `docs/step15_previsione_prossima_irrigazione.md` | questo file |
 | `CLAUDE.md` | vedi §15 |
