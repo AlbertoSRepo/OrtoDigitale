@@ -2373,5 +2373,128 @@
         "x": 720,
         "y": 685,
         "wires": []
+    },
+    {
+        "id": "ntab-forecast",
+        "type": "tab",
+        "label": "Previsione irrigazione (step 15)",
+        "disabled": false,
+        "info": "Previsione di quando avverra' la prossima irrigazione (step 15).\n\nTask 4: job orario delle statistiche di asciugatura. Tick 60s -> scheduler\nstatistiche -> query umidita (influxdb in) -> query eventi irrigazione\n(function) -> query eventi (influxdb in) -> calcolo statistiche.\nScrive global.drying_stats = { rate_pct_h, p10, p90, samples, computed_at },\nusato come fallback e come fascia di incertezza quando il meteo non e'\ndisponibile.\n\nTask 5 (simulatore di previsione) si aggancera' qui accanto: spazio lasciato\nlibero sul canvas a destra della catena.",
+        "env": []
+    },
+    {
+        "id": "nf-inject-tick",
+        "type": "inject",
+        "z": "ntab-forecast",
+        "name": "tick 60s",
+        "props": [],
+        "repeat": "60",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "30",
+        "topic": "",
+        "x": 150,
+        "y": 100,
+        "wires": [
+            [
+                "nf-fn-sched-stats"
+            ]
+        ]
+    },
+    {
+        "id": "nf-fn-sched-stats",
+        "type": "function",
+        "z": "ntab-forecast",
+        "name": "scheduler statistiche",
+        "func": "// Decide se e ora di ricalcolare le statistiche di asciugatura.\nconst cfg = global.get('irrigation_config');\nif (!cfg || !cfg.forecast || cfg.forecast.enabled === false) return null;\nconst now = Date.now();\nconst last = global.get('last_drying_stats_at') || 0;\nif ((now - last) < cfg.forecast.stats_refresh_interval_seconds * 1000) return null;\nglobal.set('last_drying_stats_at', now);\n\nconst giorni = cfg.forecast.stats_window_days;\nmsg.query = `\nfrom(bucket:\"garden\")\n  |> range(start: -${giorni}d)\n  |> filter(fn: (r) => r._measurement == \"soil_moisture\" and r._field == \"value\")\n  |> aggregateWindow(every: 15m, fn: mean, createEmpty: false)\n  |> group()\n  |> aggregateWindow(every: 15m, fn: mean, createEmpty: false)\n  |> keep(columns:[\"_time\",\"_value\"])\n  |> sort(columns:[\"_time\"])`;\nnode.status({ fill: 'blue', shape: 'dot', text: 'stats: query umidita' });\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 380,
+        "y": 100,
+        "wires": [
+            [
+                "nf-influx-moisture"
+            ]
+        ]
+    },
+    {
+        "id": "nf-influx-moisture",
+        "type": "influxdb in",
+        "z": "ntab-forecast",
+        "influxdb": "cfg-influxdb",
+        "name": "Flux umidita (asciugatura)",
+        "query": "",
+        "rawOutput": false,
+        "precision": "",
+        "retentionPolicy": "",
+        "org": "orto-digitale",
+        "x": 620,
+        "y": 100,
+        "wires": [
+            [
+                "nf-fn-query-eventi"
+            ]
+        ]
+    },
+    {
+        "id": "nf-fn-query-eventi",
+        "type": "function",
+        "z": "ntab-forecast",
+        "name": "query eventi irrigazione",
+        "func": "// Conserva la serie di umidita e chiede gli eventi di irrigazione della finestra.\nglobal.set('tmp_moisture_series', msg.payload || []);\nconst cfg = global.get('irrigation_config');\nconst giorni = cfg.forecast.stats_window_days;\nmsg.query = `\nfrom(bucket:\"garden\")\n  |> range(start: -${giorni}d)\n  |> filter(fn: (r) => r._measurement == \"irrigation_events\" and r._field == \"duration_seconds\" and r._value > 0)\n  |> keep(columns:[\"_time\",\"_value\"])\n  |> sort(columns:[\"_time\"])`;\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 870,
+        "y": 100,
+        "wires": [
+            [
+                "nf-influx-eventi"
+            ]
+        ]
+    },
+    {
+        "id": "nf-influx-eventi",
+        "type": "influxdb in",
+        "z": "ntab-forecast",
+        "influxdb": "cfg-influxdb",
+        "name": "Flux eventi irrigazione",
+        "query": "",
+        "rawOutput": false,
+        "precision": "",
+        "retentionPolicy": "",
+        "org": "orto-digitale",
+        "x": 1110,
+        "y": 100,
+        "wires": [
+            [
+                "nf-fn-stats"
+            ]
+        ]
+    },
+    {
+        "id": "nf-fn-stats",
+        "type": "function",
+        "z": "ntab-forecast",
+        "name": "calcola statistiche asciugatura",
+        "func": "// Stima empirica della velocita di asciugatura dalla serie di umidita media.\n// Esclude le finestre contaminate dall irrigazione: da 30 min prima\n// dell apertura a 3 h dopo la chiusura (il picco di risposta arriva a ~90 min).\nconst cfg = global.get('irrigation_config');\nif (!cfg || !cfg.forecast) return null;\n\nconst serie = global.get('tmp_moisture_series') || [];\nglobal.set('tmp_moisture_series', null);\nconst eventi = msg.payload || [];\n\nconst MIN_CAMPIONI = 10;\nconst PRIMA_MS = 30 * 60000;\nconst DOPO_MS = 3 * 3600000;\n\nconst finestre = eventi.map((e) => {\n    const chiusura = new Date(e._time).getTime();\n    const durata = (Number(e._value) || 0) * 1000;\n    return [chiusura - durata - PRIMA_MS, chiusura + DOPO_MS];\n});\nconst contaminato = (ts) => finestre.some(([a, b]) => ts >= a && ts <= b);\n\nconst punti = serie\n    .map((p) => ({ ts: new Date(p._time).getTime(), v: Number(p._value) }))\n    .filter((p) => Number.isFinite(p.ts) && Number.isFinite(p.v))\n    .sort((a, b) => a.ts - b.ts);\n\nconst velocita = [];\nfor (let i = 1; i < punti.length; i++) {\n    const a = punti[i - 1], b = punti[i];\n    const dt_h = (b.ts - a.ts) / 3600000;\n    if (dt_h <= 0 || dt_h > 0.5) continue;          // buchi nella serie: salta\n    if (contaminato(a.ts) || contaminato(b.ts)) continue;\n    const delta = b.v - a.v;\n    if (delta > 0) continue;                         // sale: pioggia o irrigazione non tracciata\n    velocita.push(-delta / dt_h);\n}\n\nif (velocita.length < MIN_CAMPIONI) {\n    node.warn(`drying_stats: solo ${velocita.length} campioni puliti, stima non pubblicata`);\n    node.status({ fill: 'yellow', shape: 'ring', text: `campioni ${velocita.length}` });\n    return null;\n}\n\nvelocita.sort((a, b) => a - b);\nconst perc = (p) => velocita[Math.min(velocita.length - 1, Math.floor(velocita.length * p))];\n\nconst stats = {\n    rate_pct_h: Number(perc(0.5).toFixed(3)),\n    p10: Number(perc(0.1).toFixed(3)),\n    p90: Number(perc(0.9).toFixed(3)),\n    samples: velocita.length,\n    computed_at: Date.now()\n};\nglobal.set('drying_stats', stats);\nnode.status({ fill: 'green', shape: 'dot', text: `${stats.rate_pct_h} %/h (n=${stats.samples})` });\nreturn null;\n",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1360,
+        "y": 100,
+        "wires": [
+            []
+        ]
     }
 ]
