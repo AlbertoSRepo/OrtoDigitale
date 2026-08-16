@@ -251,15 +251,40 @@ await t('terreno bagnato: si asciuga e apre piu avanti', async () => {
   assert.ok(new Date(f.next_irrigation.predicted_at).getTime() > now + 6 * 3600000);
 });
 
-await t('di notte la curva e piatta: nessun attraversamento notturno', async () => {
+// Le due prove seguenti sostituiscono un test precedente che nominava il
+// gate giorno/notte senza vincolarlo: la finestra oraria mascherava il
+// difetto (con o senza gate, l apertura finiva comunque non prima delle 6,
+// perche' la regola out_of_window la spostava li' in entrambi i casi). Qui
+// si osserva la grandezza direttamente (a) e si sceglie uno scenario dove
+// la finestra oraria non puo' mascherare nulla (b, soglia di emergenza).
+
+await t('di notte la velocita di asciugatura proiettata e nulla (ET0 notturno = 0)', async () => {
   const now = oggiAlle(1, 0);
   const h = bancoSim({ umidita: [41, 41], now });
   await simula(h, now);
   const f = h.store.irrigation_forecast;
-  if (f.next_irrigation) {
-    const ora = new Date(f.next_irrigation.predicted_at).getHours();
-    assert.ok(ora >= 6, `previsione alle ${ora}: con ET0 nulla non puo scendere di notte`);
-  }
+  assert.equal(f.current.drying_rate_pct_h, 0,
+    `a notte fonda, con ET0 nullo in curva a quell ora, la velocita proiettata deve essere 0, non ${f.current.drying_rate_pct_h}`);
+});
+
+await t('di notte la proiezione non scivola in emergenza: ferma fino alla finestra dell alba', async () => {
+  const now = oggiAlle(1, 0);
+  // Umidita appena sopra la soglia di emergenza (25%). Se la proiezione
+  // asciugasse anche di notte, scenderebbe sotto soglia nel cuore della
+  // notte e la regola di emergenza scavalcherebbe la finestra oraria,
+  // aprendo prima dell alba. Con ET0 notturno a zero l umidita resta ferma:
+  // l apertura arriva solo quando si apre la finestra mattutina (06:00),
+  // per la regola ordinaria, non per emergenza. La finestra oraria qui non
+  // puo' mascherare il difetto: lo rende visibile come differenza di orario
+  // e di trigger.
+  const h = bancoSim({ umidita: [26, 26], now });
+  await simula(h, now);
+  const f = h.store.irrigation_forecast;
+  assert.ok(f.next_irrigation, 'attesa comunque un apertura entro l orizzonte');
+  assert.notEqual(f.next_irrigation.trigger, 'emergency',
+    'la proiezione e scesa in emergenza di notte: il gate giorno/notte non ha tenuto');
+  const ora = new Date(f.next_irrigation.predicted_at).getHours();
+  assert.equal(ora, 6, `attesa apertura alle 06:00 (finestra mattutina), non prima: ottenuta alle ${ora}`);
 });
 
 await t('pioggia abbondante nell orizzonte: nessuna irrigazione, motivo rain_forecast', async () => {
