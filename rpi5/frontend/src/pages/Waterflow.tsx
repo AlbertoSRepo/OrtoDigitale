@@ -1,6 +1,8 @@
 import { useStore, resolvePeriod } from '../state/store';
 import { useValveCumulative, useValveIntervals, useValveState } from '../api/valve';
+import { useIrrigationForecast } from '../api/forecast';
 import { ValveCard } from '../components/ValveCard';
+import { NextIrrigationCard } from '../components/NextIrrigationCard';
 import { ValveStepChart } from '../components/ValveStepChart';
 import { EventsList } from '../components/EventsList';
 import { DateRangePicker } from '../components/DateRangePicker';
@@ -13,11 +15,16 @@ export function Waterflow() {
   const stateQ = useValveState();
   const intervalsQ = useValveIntervals(period);
   const cumulativeQ = useValveCumulative(period);
+  const forecastQ = useIrrigationForecast();
 
   const resolved = resolvePeriod(period);
 
   return (
     <div className="tab-panel">
+      <section className="grid" style={{ marginBottom: 18 }}>
+        <NextIrrigationCard forecast={forecastQ.data} loading={forecastQ.isLoading} />
+      </section>
+
       <section className="grid" style={{ marginBottom: 18 }}>
         <div className="span-12">
           <ValveCard

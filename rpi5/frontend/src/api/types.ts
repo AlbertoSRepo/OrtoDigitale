@@ -190,3 +190,26 @@ export interface OpenValveAck {
   state: string;
   duration_seconds_applied?: number;
 }
+
+export interface NextIrrigation {
+  predicted_at: string;
+  band_start: string;
+  band_end: string;
+  /** true quando band_end e' il bordo dell'orizzonte (72h), non un istante
+   *  calcolato: lo scenario ottimistico non attraversa la soglia entro allora. */
+  band_end_open: boolean;
+  expected_duration_seconds: number;
+  trigger: 'auto' | 'emergency';
+  /** regola che ha determinato QUEL momento; null se apre al primo passo simulato. */
+  limiting_rule: string | null;
+}
+
+export interface IrrigationForecast {
+  generated_at: string;
+  mode: string;
+  next_irrigation: NextIrrigation | null;
+  current: { moisture_mean: number | null; sensor_count: number; drying_rate_pct_h: number };
+  model: { method: 'et0' | 'empirical'; k_pct_per_mm: number | null; weather_available: boolean };
+  confidence: { level: number; reasons: string[] };
+  no_irrigation_reason: string | null;
+}

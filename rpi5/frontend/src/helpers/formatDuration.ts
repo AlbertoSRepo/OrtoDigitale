@@ -23,3 +23,18 @@ export function fmtHM(seconds: number | null | undefined): string {
   const m = Math.floor((s % 3600) / 60);
   return `${h}h ${String(m).padStart(2, '0')}m`;
 }
+
+// fmtRelative (formatDate.ts) guarda al passato ('5m fa'). Qui serve il verso
+// opposto per la previsione della prossima irrigazione ('fra 25 min'): non va
+// riusata, perché per un istante futuro fmtRelative risponde solo 'in arrivo'.
+export function fmtFraQuanto(iso: string | null | undefined, ora: number = Date.now()): string {
+  if (!iso) return '—';
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return '—';
+  const s = Math.round((t - ora) / 1000);
+  if (s <= 0) return 'ora';
+  if (s < 3600) return `fra ${Math.round(s / 60)} min`;
+  const h = Math.round(s / 3600);
+  if (h < 48) return `fra ${h} h`;
+  return `fra ${Math.round(h / 24)} giorni`;
+}
