@@ -477,5 +477,24 @@ await t('il point per InfluxDB esce come secondo output', async () => {
   assert.equal(out[1].payload[1].method, 'et0');
 });
 
+console.log('\n— endpoint API —');
+
+const risposta = compila('nf-fn-http');
+
+await t('risponde 200 con la previsione in context', async () => {
+  const h = banco({ irrigation_forecast: { generated_at: 'x', mode: 'auto', next_irrigation: null, no_irrigation_reason: 'moisture_sufficient' } });
+  const msg = await risposta({}, h.node, h.global, h.env, h.fs);
+  assert.equal(msg.statusCode, 200);
+  assert.equal(msg.payload.no_irrigation_reason, 'moisture_sufficient');
+  assert.equal(msg.headers['Content-Type'], 'application/json');
+});
+
+await t('senza previsione ancora calcolata risponde 503, non 200 con dati finti', async () => {
+  const h = banco({});
+  const msg = await risposta({}, h.node, h.global, h.env, h.fs);
+  assert.equal(msg.statusCode, 503);
+  assert.equal(msg.payload.ok, false);
+});
+
 console.log(`\n${ok} passati, ${ko} falliti`);
 process.exit(ko ? 1 : 0);

@@ -2536,5 +2536,53 @@
         "x": 1900,
         "y": 100,
         "wires": []
+    },
+    {
+        "id": "nf-http-in",
+        "type": "http in",
+        "z": "ntab-forecast",
+        "name": "GET /api/irrigation/forecast",
+        "url": "/api/irrigation/forecast",
+        "method": "get",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 150,
+        "y": 260,
+        "wires": [
+            [
+                "nf-fn-http"
+            ]
+        ]
+    },
+    {
+        "id": "nf-fn-http",
+        "type": "function",
+        "z": "ntab-forecast",
+        "name": "risposta dal context",
+        "func": "// Risponde dalla previsione in context: nessuna query, nessuna chiamata esterna.\nmsg.headers = { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' };\nconst f = global.get('irrigation_forecast');\nif (!f) {\n    msg.statusCode = 503;\n    msg.payload = { ok: false, error: 'previsione non ancora calcolata' };\n    return msg;\n}\nmsg.statusCode = 200;\nmsg.payload = f;\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 400,
+        "y": 260,
+        "wires": [
+            [
+                "nf-http-resp"
+            ]
+        ]
+    },
+    {
+        "id": "nf-http-resp",
+        "type": "http response",
+        "z": "ntab-forecast",
+        "name": "resp",
+        "statusCode": "",
+        "headers": {},
+        "x": 650,
+        "y": 260,
+        "wires": []
     }
 ]
