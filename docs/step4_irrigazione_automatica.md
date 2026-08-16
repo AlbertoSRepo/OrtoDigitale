@@ -384,3 +384,26 @@ Rimandato a step 4+, 5 o 6:
 curl -X POST -H "Content-Type: application/json" -d '{"value": "auto"}' http://192.168.1.12:1880/api/config/mode
 ```
 
+---
+## Addendum — 2026-08-16: attivazione `mode=auto` + due bug corretti
+
+**Contesto:** il sistema è rimasto in `dry_run` da inizio maggio (nessuno switch documentato). Oggi l'utente ha deciso di attivare l'irrigazione reale e di allargare la finestra serale a `19:00–01:00`. In fase di attivazione sono emersi due bug preesistenti nel codice dello step 4, entrambi corretti e distribuiti (branch `fix/finestra-sera-overnight`, commit `696ace5` e `6f554a7`, mergiati su `main`).
+
+### Bug 1 — `inWindow()` non gestiva finestre che attraversano la mezzanotte
+`nd-fn-decision` confrontava le stringhe `HH:MM` assumendo `start < end`; una finestra `["19:00","01:00"]` non risultava mai vera per **nessun** orario, e il validatore (`v[0] < v[1]`) la rifiutava a priori con 400. Corretto: `inWindow()` ora riconosce `win[0] > win[1]` come attraversamento di mezzanotte (`cur >= start || cur < end`); i validatori HTTP e MQTT accettano `v[0] !== v[1]` invece di `v[0] < v[1]`.
+
+### Bug 2 — `POST /api/config/<dot.path>` non aggiornava mai i campi annidati
+`nc-fn-validate-http` spezzava il path dell'URL su `/` (`pathRaw.split('/')`) invece che su `.`, mentre la spec (§5.4) usa notazione a punti nell'URL. Per un path come `irrigation.finestra_sera` (un solo segmento, nessuno slash) il risultato era un array a un elemento: la lookup in `PATHS` funzionava comunque (coincidenza: `join('.')` su un array a un elemento ritorna la stringa invariata), quindi la validazione passava e la risposta diceva `{"ok":true}` — ma l'assegnazione (`target[path[0]] = value` con `target` mai sceso nel livello annidato) scriveva una chiave fantasma a livello radice (`cfg["irrigation.finestra_sera"]`) anziché `cfg.irrigation.finestra_sera`. **Effetto pratico: da quando esiste lo step 4, nessun parametro annidato (`irrigation.*`, `weather.*`, `valve.*`, `sensors.*`) è mai stato realmente modificabile via HTTP** — solo i campi di primo livello (`mode`, `pause_until`) funzionavano, per coincidenza strutturale. La via MQTT (`orto/config/set/irrigation/finestra_sera`) non era affetta, perché lo split è sullo slash del topic, coerente con la gerarchia. Corretto cambiando lo split in `pathRaw.split('.')`.
+
+Scoperto mentre si verificava perché un `POST irrigation.finestra_sera` con risposta `ok:true` non cambiava il valore letto da `GET /api/config` né da `nd-fn-decision`. La chiave fantasma residua (scritta dal tentativo prima del fix) è stata rimossa a mano dal file su disco.
+
+### Stato applicato e verificato sul RPi
+```bash
+curl -sk http://192.168.1.46:1880/api/config
+# irrigation.finestra_sera: ["19:00","01:00"]
+# mode: "auto"
+```
+- `healthcheck` (`verify_rpi5.sh`): **OK con 1 warning** (nessun sensore "rilevato" nel minuto post-riavvio, atteso — si ripopola al ciclo GW3000 successivo).
+- Umidità al momento dell'attivazione: media ~44.5% (sopra soglia apertura 40%) → il decision loop non ha aperto nulla immediatamente, comportamento atteso.
+- **Non verificato in questa sessione:** raggiungibilità/collegamento idraulico reale della valvola (`/api/valve/state` → `state:"unknown", reachable:null` subito dopo il riavvio, il check-in Zigbee del SWV avviene ogni ~30 min). Verificare fisicamente e via `/api/valve/state` prima di fare affidamento sulla prima apertura automatica reale.
+
