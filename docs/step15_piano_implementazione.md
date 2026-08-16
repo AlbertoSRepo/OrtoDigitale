@@ -2326,11 +2326,44 @@ curl -k -X POST https://192.168.1.12/api/config/mode \
 
 - [ ] **Passo 3: deploy**
 
+> ⛔ **NON copiare `irrigation_config.json` sul RPi.** Il file nel repo è un
+> **seed**, non uno specchio della produzione, e ha derivato: porta
+> `finestra_sera` a `19:00–21:00` e `mode` a `dry_run`, mentre l'impianto vive
+> con `19:00–01:00` e `mode: auto`. Sovrascriverlo accorcerebbe di quattro ore la
+> finestra serale e **fermerebbe l'irrigazione in silenzio** — `dry_run` registra
+> le decisioni ma non apre la valvola, quindi nulla lo annuncerebbe.
+>
+> La sezione `forecast` va **fusa** nel file vivo, preservando tutto il resto.
+> Non è utilizzabile `POST /api/config/forecast.<campo>`: la sezione non esiste
+> ancora sul RPi, e il validatore assegnerebbe su un oggetto `undefined`.
+
 ```bash
 scp rpi5/nodered/data/flows.json as@192.168.1.12:/opt/orto-digitale/nodered/data/flows.json
-scp rpi5/nodered/data/irrigation_config.json as@192.168.1.12:/opt/orto-digitale/nodered/data/irrigation_config.json
+
+# Fusione della sola sezione `forecast`, con backup e verifica di ciò che resta.
+scp rpi5/nodered/data/irrigation_config.json as@192.168.1.12:/tmp/config_seed.json
+ssh as@192.168.1.12 'python3 - <<PYEOF
+import json, shutil, time
+VIVO = "/opt/orto-digitale/nodered/data/irrigation_config.json"
+shutil.copy(VIVO, VIVO + ".bak-" + time.strftime("%Y%m%d-%H%M%S"))
+vivo = json.load(open(VIVO))
+seed = json.load(open("/tmp/config_seed.json"))
+prima = {"mode": vivo["mode"], "finestra_sera": vivo["irrigation"]["finestra_sera"]}
+vivo.setdefault("forecast", {})
+for k, v in seed["forecast"].items():
+    vivo["forecast"].setdefault(k, v)   # non sovrascrive valori gia tarati
+json.dump(vivo, open(VIVO, "w"), indent=2)
+dopo = {"mode": vivo["mode"], "finestra_sera": vivo["irrigation"]["finestra_sera"]}
+assert prima == dopo, f"REGRESSIONE: {prima} -> {dopo}"
+print("forecast fuso, mode e finestre invariati:", dopo)
+PYEOF'
+
 ssh as@192.168.1.12 'cd /opt/orto-digitale && docker compose restart nodered'
 ```
+
+L'`assert` è la rete di sicurezza: se la fusione toccasse `mode` o le finestre,
+lo script si ferma con errore invece di lasciare l'impianto in uno stato che
+nessuno ha chiesto.
 
 Poi il frontend, con lo script già esistente (build + rsync + reload Caddy):
 

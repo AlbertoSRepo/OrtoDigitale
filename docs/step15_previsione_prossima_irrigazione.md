@@ -464,6 +464,7 @@ Nessun tag ad alta cardinalità, coerentemente con
     "predicted_at":  "2026-08-17T06:15:00Z",
     "band_start":    "2026-08-17T05:00:00Z",
     "band_end":      "2026-08-17T20:00:00Z",
+    "band_end_open": false,
     "expected_duration_seconds": 900,
     "trigger": "auto",
     "limiting_rule": "out_of_window"
@@ -500,8 +501,27 @@ Quando non si prevede alcuna irrigazione entro l'orizzonte:
 }
 ```
 
+`band_end_open` vale `true` quando il bordo superiore della fascia **non è un
+istante calcolato ma il bordo dell'orizzonte**: lo scenario ottimistico non
+attraversa la soglia entro le 72 h. Non è un dato mancante, è l'incertezza più
+larga possibile, e il frontend deve renderlo come «oltre 3 giorni» invece di
+spacciare la data limite per una previsione.
+
+> **Correzione rispetto alla prima stesura.** Il piano faceva scartare gli
+> scenari che non attraversavano (`.filter(v => v !== null)`), col risultato che
+> `band_end` collassava sulla stima centrale. Misurato sugli scenari del piano
+> stesso: con umidità sopra il 50% l'ottimistico non può attraversare in 72 h,
+> quindi il **caso normale** produceva una fascia monca che dichiarava un bordo
+> mai calcolato.
+
 Valori ammessi per `no_irrigation_reason`: `moisture_sufficient`, `rain_forecast`,
-`paused`, `no_quorum`.
+`paused`, `no_quorum`, `cooldown`, `out_of_window`.
+
+> Gli ultimi due sono stati aggiunti in corso d'opera: la mappatura originale li
+> faceva ricadere su `moisture_sufficient`, riportando un motivo falso. Sono
+> raggiungibili quando il cooldown o le finestre orarie coprono l'intero
+> orizzonte — configurazioni che §9 consente esplicitamente di impostare a
+> runtime.
 
 Entro 72 h possono bloccare regole diverse in momenti diversi. Si riporta **la più
 informativa, non l'ultima incontrata**, secondo la priorità fissa
@@ -522,6 +542,7 @@ entrambe le condizioni sono vere: dire «piove» spiega di più che dire «è ba
 | `k` non ancora stimato | Default da config, dichiarato in `model` | −1 |
 | Sonde in forte disaccordo (stddev oltre `stddev_warning_pct`) | Fascia già allargata dal meccanismo di §4/D3, nessun trattamento aggiuntivo | −1 |
 | Statistiche di asciugatura non aggiornabili (query Influx fallita) | Si tengono le ultime valide, con la loro età | −1 |
+| Valvola non raggiungibile **adesso** | La previsione si calcola comunque (nel futuro simulato la valvola è assunta raggiungibile, vedi §5) ma la carta lo dichiara | −1 |
 | Quorum sotto `min_quorum` **adesso** | `next_irrigation: null`, motivo `no_quorum` | — |
 | `mode` = `paused` o `manual` | La carta mostra lo stato invece di una previsione che non si avvererebbe | — |
 | `mode` = `dry_run` | Previsione calcolata normalmente ed etichettata come simulazione — è il modo per verificarla senza bagnare | — |

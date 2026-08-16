@@ -8,7 +8,7 @@
     "manual_max_duration_seconds": 3600,
     "emergency_duration_seconds": 300,
     "finestra_mattina": ["06:00", "08:00"],
-    "finestra_sera": ["19:00", "21:00"],
+    "finestra_sera": ["19:00", "01:00"],
     "polling_interval_seconds": 300,
     "monitoring_interval_seconds": 60
   },
