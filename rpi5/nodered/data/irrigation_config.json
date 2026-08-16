@@ -36,6 +36,19 @@
     "poll_interval_seconds": 60,
     "min_samples_for_volume": 2
   },
+  "forecast": {
+    "enabled": true,
+    "horizon_hours": 72,
+    "step_minutes": 15,
+    "recompute_interval_seconds": 300,
+    "stats_refresh_interval_seconds": 3600,
+    "stats_window_days": 7,
+    "k_pct_per_mm": null,
+    "k_pct_per_mm_p10": null,
+    "k_pct_per_mm_p90": null,
+    "rain_gain_pct_per_mm": 1.2,
+    "fallback_drying_rate_pct_h": 0.5
+  },
   "mode": "dry_run",
   "pause_until": null
 }
