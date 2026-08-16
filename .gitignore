@@ -34,6 +34,11 @@ rpi5/system-out/stats.json
 rpi5/system-out/*.tmp
 
 # -----------------------------------------------
+# Export grezzi di analisi (dati di lavoro, non versionati)
+# -----------------------------------------------
+analysis/*.csv
+
+# -----------------------------------------------
 # Claude Code (configurazione locale IDE)
 # -----------------------------------------------
 .claude/

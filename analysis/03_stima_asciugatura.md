@@ -93,12 +93,14 @@ orizzonte | campioni | errore mediano | errore p90
 
 ## 5. Riserve — cosa questo numero non dice
 
-Due limiti misurati, non ipotetici, che chi userà la previsione deve conoscere:
+Tre limiti misurati o strutturali, non ipotetici, che chi userà la previsione deve conoscere:
 
 **a) La coda a 24 ore è spessa, e peggiora invece di migliorare col pavimento.** L'errore p90 a 24h è ~17.6 pp, ed è l'unica metrica della tabella di sensibilità (§2) che va nella direzione opposta a tutte le altre: peggiora monotonamente man mano che il pavimento sale (16.31 → 17.56). Significa che una volta su dieci la proiezione a 24 ore sbaglia di oltre 17 punti percentuali. Le previsioni a lungo raggio hanno un'incertezza reale, non solo teorica, e chi costruirà l'interfaccia deve mostrarla — non solo l'orario centrale.
 
 **b) Lo scarto fra `p10` e `p90` è un fattore ~18** (0.256 contro 4.593). La fascia di incertezza che ne deriva sarà molto larga. In particolare, con `p10 = 0.256` lo scenario ottimistico (asciugatura più lenta) attraverserà la soglia di apertura raramente entro l'orizzonte di previsione: `band_end_open` risulterà `true` quasi sempre per quello scenario. Non è un difetto del codice — è la larghezza reale dell'incertezza misurata sui dati di questo orto — ma va scritto qui, altrimenti chi lo vede per la prima volta lo scambierà per un bug.
 
+**c) Il backtest è in-sample: non c'è separazione fra dati di stima e dati di verifica.** Gli stessi campioni (e la stessa serie di umidità) usati per calcolare `k` in §3 sono quelli su cui si misura l'errore di proiezione in §4 — non esiste un holdout temporale che tenga i due usi separati. È un limite ereditato dall'impostazione stessa dell'analisi, non una scelta fatta per far tornare il numero. L'effetto atteso è modesto: `k` è una mediana su 1647 punti sparsi su ~4 mesi, non un fit calibrato finestra per finestra, quindi il rischio che il backtest stia solo "ricordando" i dati di stima è basso — ma resta un'aspettativa, non una misura. Per escluderlo del tutto servirebbe una separazione temporale esplicita (es. stimare `k` sui primi mesi del periodo e validare il backtest solo sugli ultimi), non fatta in questo giro.
+
 ## 6. Conclusione
 
-`k_pct_per_mm = 1.296`, `k_pct_per_mm_p10 = 0.256`, `k_pct_per_mm_p90 = 4.593` sostituiscono i `null` in `rpi5/nodered/data/irrigation_config.json`. Il cancello è rispettato con margine, ma le riserve del §5 (coda a 24h, fascia di incertezza molto larga) restano parte del risultato tanto quanto il numero centrale.
+`k_pct_per_mm = 1.296`, `k_pct_per_mm_p10 = 0.256`, `k_pct_per_mm_p90 = 4.593` sostituiscono i `null` in `rpi5/nodered/data/irrigation_config.json`. Il cancello è rispettato con margine, ma le riserve del §5 (coda a 24h, fascia di incertezza molto larga, backtest in-sample) restano parte del risultato tanto quanto il numero centrale.

@@ -68,6 +68,15 @@ await t('il file di config ha la sezione forecast completa', async () => {
   );
 });
 
+await t('quando i tre coefficienti sono valorizzati, rispettano p10 <= k <= p90', async () => {
+  const { k_pct_per_mm: k, k_pct_per_mm_p10: k10, k_pct_per_mm_p90: k90 } = CFG.forecast;
+  if (k === null) return; // non ancora stimato: invariante vuoto, nulla da verificare
+  assert.ok(Number.isFinite(k10), 'k_pct_per_mm e valorizzato ma k_pct_per_mm_p10 non e un numero finito');
+  assert.ok(Number.isFinite(k90), 'k_pct_per_mm e valorizzato ma k_pct_per_mm_p90 non e un numero finito');
+  assert.ok(k10 <= k, `k_pct_per_mm_p10 (${k10}) deve essere <= k_pct_per_mm (${k})`);
+  assert.ok(k <= k90, `k_pct_per_mm (${k}) deve essere <= k_pct_per_mm_p90 (${k90})`);
+});
+
 await t('si puo impostare forecast.horizon_hours via HTTP', async () => {
   const h = banco(CFG);
   const msg = await setHttp(h, 'forecast.horizon_hours', 48);

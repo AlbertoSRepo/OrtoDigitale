@@ -212,7 +212,11 @@ const finale = fitConPavimento(PAVIMENTO_ET0_MM_H);
 console.log(`campioni puliti: ${finale.n}`);
 console.log(`k    = ${finale.k.toFixed(3)} %/mm`);
 console.log(`k p10= ${finale.k10.toFixed(3)}   k p90= ${finale.k90.toFixed(3)}`);
-console.log(`ordinamento p10 <= k <= p90: ${finale.k10 <= finale.k && finale.k <= finale.k90 ? 'OK' : 'VIOLATO'}`);
+if (!(finale.k10 <= finale.k && finale.k <= finale.k90)) {
+  console.error(`ordinamento p10 <= k <= p90 VIOLATO: p10=${finale.k10} k=${finale.k} p90=${finale.k90} — non salvare questi valori in configurazione`);
+  process.exit(1);
+}
+console.log('ordinamento p10 <= k <= p90: OK');
 console.log('\norizzonte | campioni | errore mediano | errore p90');
 for (const ore of [6, 12, 24]) {
   const e = finale.errori[ore];
