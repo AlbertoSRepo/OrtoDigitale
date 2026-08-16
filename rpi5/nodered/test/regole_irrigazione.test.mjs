@@ -55,13 +55,20 @@ function banco({ umidita = [], now = oggiAlle(6, 30), cfg = CFG, meteo = null,
     weather_cache: meteo,
   };
   const warns = [];
-  return {
+  const h = {
     store, warns,
     node: { warn: (m) => warns.push(m), log: () => {}, status: () => {}, error: (m) => warns.push('ERR ' + m) },
     global: { set: (k, v) => { store[k] = v; }, get: (k) => store[k] },
     env: { get: () => undefined },
     fs: {},
   };
+  // Le regole vivono in un nodo a parte, che le registra in global all'avvio
+  // del flow: il banco fa lo stesso, altrimenti il decision loop si troverebbe
+  // senza. Finche' `nr-fn-lib` non esiste la riga e' un no-op, per questo i 12
+  // casi qui sotto valgono identici da una parte e dall'altra dell'estrazione.
+  const lib = nodoPerId('nr-fn-lib');
+  if (lib) lib({}, h.node, h.global, h.env, h.fs);
+  return h;
 }
 
 // Il nodo legge Date.now(): si congela il tempo per la durata della chiamata.
