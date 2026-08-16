@@ -163,5 +163,202 @@ await t('tutti i campioni dentro la finestra contaminata: nessuna stima (non e s
   assert.equal(s, undefined, 'con tutti i campioni contaminati non deve pubblicare una stima');
 });
 
+console.log('\n— proiezione e simulazione —');
+
+const simulatore = compila('nf-fn-simula');
+const libreria = compila('nr-fn-lib');
+
+function oggiAlle(hh, mm = 0) {
+  const d = new Date(); d.setHours(hh, mm, 0, 0); return d.getTime();
+}
+
+// Curva meteo sintetica: 96 ore dall ora corrente all indietro di 1,
+// ET0 costante di giorno e nulla di notte, pioggia a scelta.
+// Ancorata al `now` dello scenario (non a Date.now() reale): altrimenti la
+// finestra di 96h e' relativa all ora reale di esecuzione del test invece
+// che all ora simulata, e gli indici non combaciano mai (stesso bug gia
+// trovato nel parsing meteo, vedi commit 49bc438).
+function curva({ et0Giorno = 0.25, pioggiaOra = {}, now = Date.now() } = {}) {
+  const oraCorrente = Math.floor(now / 3600000) * 3600;
+  const t0 = oraCorrente - 3600;
+  const time = Array.from({ length: 96 }, (_, i) => t0 + i * 3600);
+  const et0 = time.map((s) => {
+    const ora = new Date(s * 1000).getHours();
+    return ora >= 7 && ora < 20 ? et0Giorno : 0;
+  });
+  const precipitation = time.map((_, i) => pioggiaOra[i] || 0);
+  return { time, precipitation, et0 };
+}
+
+// Config con k gia stimato: la maggior parte dei casi esercita il modello ET0.
+// Chi vuole il fallback empirico passa meteo:false o un cfg senza k.
+const CFG_K = JSON.parse(JSON.stringify(CFG));
+CFG_K.forecast.k_pct_per_mm = 2.0;
+CFG_K.forecast.k_pct_per_mm_p10 = 1.2;
+CFG_K.forecast.k_pct_per_mm_p90 = 3.0;
+
+function bancoSim({ umidita = [30, 32], now = Date.now(), meteo = true, cfg = CFG_K,
+                    last_irrigation_at = 0, stats = { rate_pct_h: 0.5, p10: 0.3, p90: 0.8, samples: 200, computed_at: Date.now() },
+                    pioggiaOra = {} } = {}) {
+  const h = banco({
+    soil_moisture_cache: Object.fromEntries(umidita.map((v, i) => [`WH51_0${i + 1}`, { value: v, ts: now - 60000 }])),
+    last_irrigation_at,
+    valve_reachable: true,
+    drying_stats: stats,
+    weather_cache: meteo ? { fetched_at: now - 60000, precip_next_24h_mm: 0, hourly: curva({ pioggiaOra, now }) } : null,
+  });
+  h.store.irrigation_config = JSON.parse(JSON.stringify(cfg));
+  return h;
+}
+
+async function simula(h, now = Date.now()) {
+  await libreria({}, h.node, h.global, h.env, h.fs);
+  const vero = Date.now;
+  Date.now = () => now;
+  try { return await simulatore({}, h.node, h.global, h.env, h.fs); }
+  finally { Date.now = vero; }
+}
+
+await t('terreno secco dentro la finestra: apre subito', async () => {
+  const now = oggiAlle(6, 30);
+  const h = bancoSim({ umidita: [30, 32], now });
+  await simula(h, now);
+  const f = h.store.irrigation_forecast;
+  assert.ok(f.next_irrigation, 'nessuna previsione prodotta');
+  assert.ok(Math.abs(new Date(f.next_irrigation.predicted_at).getTime() - now) < 20 * 60000);
+  assert.equal(f.next_irrigation.expected_duration_seconds, 900);
+});
+
+await t('secco ma fuori finestra: la regola limitante e out_of_window', async () => {
+  const now = oggiAlle(14, 0);
+  const h = bancoSim({ umidita: [30, 32], now });
+  await simula(h, now);
+  const f = h.store.irrigation_forecast;
+  assert.ok(f.next_irrigation);
+  assert.equal(f.next_irrigation.limiting_rule, 'out_of_window');
+  const previsto = new Date(f.next_irrigation.predicted_at);
+  assert.equal(previsto.getHours(), 19, 'attesa apertura alla finestra serale');
+});
+
+await t('terreno bagnato: si asciuga e apre piu avanti', async () => {
+  const now = oggiAlle(6, 30);
+  // 50% con ET0 diurna 0.25 mm/h e k=2.0 -> ~0.5 %/h di giorno: ~1.5 giorni
+  // per scendere sotto 40, dentro l orizzonte di 72h.
+  const h = bancoSim({ umidita: [50, 50], now });
+  await simula(h, now);
+  const f = h.store.irrigation_forecast;
+  assert.ok(f.next_irrigation, 'con ET0 positiva deve prima o poi scendere sotto soglia');
+  assert.ok(new Date(f.next_irrigation.predicted_at).getTime() > now + 6 * 3600000);
+});
+
+await t('di notte la curva e piatta: nessun attraversamento notturno', async () => {
+  const now = oggiAlle(1, 0);
+  const h = bancoSim({ umidita: [41, 41], now });
+  await simula(h, now);
+  const f = h.store.irrigation_forecast;
+  if (f.next_irrigation) {
+    const ora = new Date(f.next_irrigation.predicted_at).getHours();
+    assert.ok(ora >= 6, `previsione alle ${ora}: con ET0 nulla non puo scendere di notte`);
+  }
+});
+
+await t('pioggia abbondante nell orizzonte: nessuna irrigazione, motivo rain_forecast', async () => {
+  const now = oggiAlle(6, 30);
+  const pioggia = {}; for (let i = 2; i < 30; i++) pioggia[i] = 2;
+  const h = bancoSim({ umidita: [39, 39], now, pioggiaOra: pioggia });
+  await simula(h, now);
+  const f = h.store.irrigation_forecast;
+  assert.equal(f.next_irrigation, null);
+  assert.equal(f.no_irrigation_reason, 'rain_forecast');
+});
+
+await t('la pioggia vince sull umidita alta nel riportare il motivo', async () => {
+  const now = oggiAlle(6, 30);
+  // Piove per tutto l orizzonte: l umidita sale sopra soglia, quindi entrambe
+  // le regole bloccano. Deve essere riportata rain_forecast, che spiega di piu.
+  const pioggia = {}; for (let i = 0; i < 96; i++) pioggia[i] = 2;
+  const h = bancoSim({ umidita: [30, 30], now, pioggiaOra: pioggia });
+  await simula(h, now);
+  const f = h.store.irrigation_forecast;
+  assert.equal(f.next_irrigation, null);
+  assert.equal(f.no_irrigation_reason, 'rain_forecast');
+});
+
+await t('umidita alta e stabile: motivo moisture_sufficient', async () => {
+  const now = oggiAlle(6, 30);
+  const h = bancoSim({ umidita: [80, 80], now, meteo: true });
+  h.store.weather_cache.hourly.et0 = h.store.weather_cache.hourly.et0.map(() => 0);
+  await simula(h, now);
+  const f = h.store.irrigation_forecast;
+  assert.equal(f.next_irrigation, null);
+  assert.equal(f.no_irrigation_reason, 'moisture_sufficient');
+});
+
+await t('senza meteo passa a empirical e abbassa la confidenza', async () => {
+  const now = oggiAlle(6, 30);
+  const h = bancoSim({ umidita: [45, 45], now, meteo: false });
+  await simula(h, now);
+  const f = h.store.irrigation_forecast;
+  assert.equal(f.model.method, 'empirical');
+  assert.ok(f.confidence.level < 4);
+  assert.ok(f.confidence.reasons.some((r) => /meteo/i.test(r)));
+});
+
+await t('senza regole registrate non inventa nulla', async () => {
+  const now = oggiAlle(6, 30);
+  const h = bancoSim({ umidita: [30, 32], now });
+  const vero = Date.now; Date.now = () => now;
+  try { await simulatore({}, h.node, h.global, h.env, h.fs); } finally { Date.now = vero; }
+  assert.equal(h.store.irrigation_forecast, undefined);
+  assert.ok(h.warns.some((w) => /orto_rules/.test(w)));
+});
+
+await t('quorum insufficiente: nessuna previsione, motivo no_quorum', async () => {
+  const now = oggiAlle(6, 30);
+  const h = bancoSim({ umidita: [30], now });
+  await simula(h, now);
+  const f = h.store.irrigation_forecast;
+  assert.equal(f.next_irrigation, null);
+  assert.equal(f.no_irrigation_reason, 'no_quorum');
+});
+
+await t('sistema in pausa: motivo paused', async () => {
+  const now = oggiAlle(6, 30);
+  const cfg = JSON.parse(JSON.stringify(CFG)); cfg.mode = 'paused';
+  const h = bancoSim({ umidita: [30, 32], now, cfg });
+  await simula(h, now);
+  assert.equal(h.store.irrigation_forecast.no_irrigation_reason, 'paused');
+});
+
+await t('la fascia contiene la stima centrale ed e ordinata', async () => {
+  const now = oggiAlle(6, 30);
+  const h = bancoSim({ umidita: [55, 55], now });
+  await simula(h, now);
+  const n = h.store.irrigation_forecast.next_irrigation;
+  if (n) {
+    const a = new Date(n.band_start).getTime();
+    const c = new Date(n.predicted_at).getTime();
+    const b = new Date(n.band_end).getTime();
+    assert.ok(a <= c && c <= b, `fascia incoerente: ${n.band_start} / ${n.predicted_at} / ${n.band_end}`);
+  }
+});
+
+await t('sonde in disaccordo: confidenza piu bassa', async () => {
+  const now = oggiAlle(6, 30);
+  const h = bancoSim({ umidita: [10, 70], now });
+  await simula(h, now);
+  const f = h.store.irrigation_forecast;
+  assert.ok(f.confidence.reasons.some((r) => /disaccordo/i.test(r)));
+});
+
+await t('il point per InfluxDB esce come secondo output', async () => {
+  const now = oggiAlle(6, 30);
+  const h = bancoSim({ umidita: [30, 32], now });
+  const out = await simula(h, now);
+  assert.ok(Array.isArray(out), 'attesi due output');
+  assert.equal(out[1].measurement, 'irrigation_forecast');
+  assert.equal(out[1].payload[1].method, 'et0');
+});
+
 console.log(`\n${ok} passati, ${ko} falliti`);
 process.exit(ko ? 1 : 0);
