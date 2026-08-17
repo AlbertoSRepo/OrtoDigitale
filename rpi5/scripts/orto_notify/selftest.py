@@ -465,7 +465,107 @@ def _sezione_conferma():
     prova("stato mancante = dizionario vuoto", stato_mancante_e_dizionario_vuoto)
 
 
-SEZIONI = [_sezione_influx, _sezione_features, _sezione_guardie, _sezione_modello, _sezione_conferma]
+def _sezione_messaggi():
+    from datetime import datetime, timezone
+    from orto_notify import messages, telegram, TELEGRAM_MAX_CHAR
+
+    print("messaggi e telegram")
+
+    ORA = datetime(2026, 8, 17, 14, 12, tzinfo=timezone.utc)
+    CONTESTO = {
+        "batterie": {"WH51_01": 1.51, "WH51_02": 1.60, "WH51_03": 1.60, "WH51_04": 1.60},
+        "aiuola": {"WH51_01": "aiuola 1, vicino all'ingresso acqua"},
+    }
+
+    def muta_nomina_i_numeri():
+        testo = messages.componi(
+            {"sensor_id": "WH51_01", "tipo": "muta", "ora": ORA,
+             "dettagli": {"silenzio_min": 52, "ultima_lettura": 47.0, "batteria": 1.51}},
+            CONTESTO)
+        assert "WH51_01" in testo
+        assert "52" in testo
+        assert "1.51" in testo
+
+    def niente_costrutti_markdown():
+        # ATTENZIONE: NON si puo' pretendere l'assenza di "_", perche' i nomi
+        # delle sonde lo contengono (WH51_01). E' proprio questo il motivo per
+        # cui parse_mode non va MAI impostato: in testo semplice l'underscore
+        # e' innocuo, con parse_mode=Markdown fa fallire l'invio con 400.
+        # Qui si controllano i soli costrutti che scriveremmo noi.
+        for tipo, dett in (
+            ("muta", {"silenzio_min": 52, "ultima_lettura": 47.0, "batteria": 1.51}),
+            ("batteria_bassa", {"batteria": 1.12}),
+            ("batteria_calo", {"pendenza_v_settimana": -0.029, "batteria": 1.51,
+                               "batteria_iniziale": 1.60}),
+            ("valore_bloccato", {"ore": 14, "valore": 50.0}),
+            ("anomalia", {"ore_anomale": 4, "su_ore": 6,
+                          "spiegazione": {"tasso_consegna": (0.98, 1.0)}}),
+        ):
+            testo = messages.componi(
+                {"sensor_id": "WH51_01", "tipo": tipo, "ora": ORA, "dettagli": dett},
+                CONTESTO)
+            for vietato in ("*", "`", "[", "](" ):
+                assert vietato not in testo, (tipo, vietato, testo)
+            # l'underscore c'e' e va bene: e' nel nome della sonda
+            assert "WH51_01" in testo, testo
+
+    def anomalia_e_cauta():
+        testo = messages.componi(
+            {"sensor_id": "WH51_03", "tipo": "anomalia", "ora": ORA,
+             "dettagli": {"ore_anomale": 4, "su_ore": 6,
+                          "spiegazione": {"scarto_da_sorelle": (11.0, 3.0)}}},
+            CONTESTO)
+        assert "osservazione" in testo.lower(), testo
+
+    def batteria_calo_dichiara_la_riserva():
+        testo = messages.componi(
+            {"sensor_id": "WH51_01", "tipo": "batteria_calo", "ora": ORA,
+             "dettagli": {"pendenza_v_settimana": -0.029, "batteria": 1.51,
+                          "batteria_iniziale": 1.60}},
+            CONTESTO)
+        # La proiezione lineare sovrastima: la riserva va sempre detta.
+        assert "prima" in testo.lower(), testo
+
+    def spezza_sotto_il_limite():
+        assert telegram.spezza("breve") == ["breve"]
+
+    def spezza_sopra_il_limite():
+        testo = "\n\n".join("blocco %d %s" % (i, "x" * 500) for i in range(20))
+        pezzi = telegram.spezza(testo)
+        assert len(pezzi) > 1
+        for p in pezzi:
+            assert len(p) <= TELEGRAM_MAX_CHAR, len(p)
+        # nulla si perde
+        assert "blocco 19" in pezzi[-1]
+
+    def invio_usa_il_trasporto():
+        visti = []
+
+        def finto(url, payload):
+            visti.append((url, payload))
+            return '{"ok":true}'
+
+        n = telegram.invia("ciao", "TOK", "42", trasporto=finto)
+        assert n == 1, n
+        assert "TOK" in visti[0][0]
+        assert visti[0][1]["chat_id"] == "42"
+        assert "parse_mode" not in visti[0][1], visti[0][1]
+
+    def senza_token_non_invia_e_non_esplode():
+        n = telegram.invia("ciao", "", "42", trasporto=None)
+        assert n == 0, n
+
+    prova("il messaggio di sonda muta porta i numeri", muta_nomina_i_numeri)
+    prova("nessun messaggio usa costrutti Markdown", niente_costrutti_markdown)
+    prova("il messaggio del modello resta cauto", anomalia_e_cauta)
+    prova("la proiezione batteria dichiara la riserva", batteria_calo_dichiara_la_riserva)
+    prova("testo breve resta un messaggio", spezza_sotto_il_limite)
+    prova("testo lungo si spezza senza perdere nulla", spezza_sopra_il_limite)
+    prova("l'invio passa dal trasporto iniettato", invio_usa_il_trasporto)
+    prova("senza token non invia e non esplode", senza_token_non_invia_e_non_esplode)
+
+
+SEZIONI = [_sezione_influx, _sezione_features, _sezione_guardie, _sezione_modello, _sezione_conferma, _sezione_messaggi]
 
 
 if __name__ == "__main__":
