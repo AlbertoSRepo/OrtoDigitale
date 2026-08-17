@@ -146,3 +146,92 @@ console.log('\n--- FASE A: pavimento di rumore (modello di sola asciugatura, ori
 const pavimento = erroreProiezione(2, {}).puliti;
 console.log(`campioni: ${pavimento.n} | errore mediano: ${pavimento.med.toFixed(2)} pp | errore p90: ${pavimento.p90.toFixed(2)} pp`);
 if (pavimento.n < 30) { console.error('troppo pochi campioni puliti per stimare il pavimento di rumore'); process.exit(1); }
+
+// ============================================================
+// FASE B — contro-fattuale continua attraverso una finestra (a
+// differenza di erroreProiezione, che nella modalita "puliti" la
+// finestra la esclude): riparte dall'ultimo campione pulito prima
+// dell'inizio finestra e proietta "solo asciugatura" fino alla fine,
+// campione per campione. Il residuo (osservato - contro-fattuale) e
+// la "sorpresa": quanto la realta si scosta da cio che l'asciugatura
+// da sola avrebbe prodotto.
+// ============================================================
+
+// Ultimo campione di umidita, a o prima di ts, che non cade in nessuna
+// finestra di irrigazione.
+function ultimoCampionePulito(ts) {
+  for (let i = umidita.length - 1; i >= 0; i--) {
+    if (umidita[i].ts > ts) continue;
+    if (!contaminato(umidita[i].ts)) return umidita[i];
+  }
+  return null;
+}
+
+// Residuo di picco in (inizio, fine]: il campione dove osservato meno
+// contro-fattuale e' massimo. Ritorna null se manca un punto di partenza
+// pulito o se la finestra non contiene campioni.
+function residuoDiPicco(inizio, fine) {
+  const base = ultimoCampionePulito(inizio);
+  if (!base) return null;
+  const campioniFinestra = umidita.filter((s) => s.ts > inizio && s.ts <= fine);
+  if (campioniFinestra.length === 0) return null;
+  let controFattuale = base.v;
+  let tPrec = base.ts;
+  let migliore = null;
+  for (const s of campioniFinestra) {
+    for (let t = tPrec; t < s.ts && Number.isFinite(controFattuale); t += 900000) {
+      const h = oraDi(t);
+      if (h < 0) { controFattuale = NaN; break; }
+      controFattuale -= K * (et0[h] || 0) * 0.25;
+    }
+    tPrec = s.ts;
+    if (!Number.isFinite(controFattuale)) continue;
+    const residuo = s.v - controFattuale;
+    if (!migliore || residuo > migliore.residuo) {
+      migliore = { ts: s.ts, residuo, controFattuale, osservato: s.v };
+    }
+  }
+  return migliore;
+}
+
+// Raggruppa le ore di pioggia (dall'archivio orario) in eventi continui:
+// ore consecutive con pioggia[h] > 0 diventano un unico evento. Un'ora
+// secca interrompe il gruppo (nessuna tolleranza a buchi, semplificazione
+// dichiarata nella spec §4).
+function eventiPioggia() {
+  const eventi = [];
+  let corrente = null;
+  for (let i = 0; i < tempo.length; i++) {
+    const mm = pioggia[i] || 0;
+    if (mm > 0) {
+      if (!corrente) corrente = { inizio: tempo[i] * 1000, fine: (tempo[i] + 3600) * 1000, mm };
+      else { corrente.fine = (tempo[i] + 3600) * 1000; corrente.mm += mm; }
+    } else if (corrente) {
+      eventi.push(corrente);
+      corrente = null;
+    }
+  }
+  if (corrente) eventi.push(corrente);
+  return eventi;
+}
+const finestrePioggia = eventiPioggia()
+  .filter((e) => e.inizio >= umidita[0].ts && e.fine <= umidita[umidita.length - 1].ts)
+  .map((e) => ({ ...e, fineFinestra: e.fine + DOPO_MS }));
+
+console.log(`\nore di pioggia raggruppate in ${finestrePioggia.length} eventi (periodo coperto)`);
+
+// --- tabella di sensibilita' sul fattore di sicurezza (Fase C) ---
+console.log('\n--- FASE B/C: sorprese per fattore di sicurezza (soglia = fattore * pavimento mediano) ---');
+console.log('fattore | soglia (pp) | sorprese irrigazione | sorprese pioggia');
+for (const fattore of [1.5, 2, 3]) {
+  const soglia = fattore * pavimento.med;
+  const nIrr = finestreIrrigazione.filter((f) => {
+    const r = residuoDiPicco(f.inizio, f.fine);
+    return r && Math.abs(r.residuo) > soglia;
+  }).length;
+  const nPioggia = finestrePioggia.filter((f) => {
+    const r = residuoDiPicco(f.inizio, f.fineFinestra);
+    return r && Math.abs(r.residuo) > soglia;
+  }).length;
+  console.log(`${fattore.toFixed(1).padStart(7)} | ${soglia.toFixed(2).padStart(11)} | ${String(nIrr).padStart(21)} | ${String(nPioggia).padStart(16)}`);
+}
