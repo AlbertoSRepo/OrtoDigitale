@@ -2246,7 +2246,7 @@ ssh as@192.168.1.12 'echo aru63 | sudo -S bash -c "
 
 - [ ] **Passo 4: prova a secco prima di attivare il timer**
 
-```bash
+```
 ssh as@192.168.1.12 'set -a; . /opt/orto-digitale/.env; set +a; cd /opt/orto-digitale/scripts && python3 -m orto_notify --once --dry-run'
 ```
 
@@ -2255,7 +2255,7 @@ Atteso: stampa `righe=...` e gli eventuali messaggi, **senza** inviare nulla. Se
 
 - [ ] **Passo 5: primo invio vero**
 
-```bash
+```
 ssh as@192.168.1.12 'set -a; . /opt/orto-digitale/.env; set +a; cd /opt/orto-digitale/scripts && python3 -m orto_notify --once'
 ```
 
@@ -2496,18 +2496,35 @@ Il bot può scrivere solo a chi gli ha parlato per primo. Quindi:
 1. Cerca il tuo bot con lo username che hai scelto e apri la chat
 2. Premi **Avvia** (o scrivi `/start`) e manda un messaggio qualsiasi, anche solo `ciao`
 
-Poi, dal PC, chiedi a Telegram cosa ha ricevuto — sostituisci `<TOKEN>` con il tuo:
+Poi, dal PC, chiedi a Telegram cosa ha ricevuto — sostituisci `<TOKEN>` con il tuo.
+
+> ⚠️ **Lo sviluppo di questo progetto avviene da PowerShell su Windows**, dove `curl` non è
+> curl ma un alias di `Invoke-WebRequest` (sintassi diversa, fallisce con
+> *«Impossibile trovare l'unità 'https'»*) e `tr`/`grep` non esistono affatto. Usa la
+> versione PowerShell.
+
+**PowerShell** (una riga, stampa direttamente il numero):
+
+```powershell
+(Invoke-RestMethod "https://api.telegram.org/bot<TOKEN>/getUpdates").result.message.chat.id
+```
+
+**Bash** (Git Bash, WSL, o direttamente sul Raspberry):
 
 ```bash
 curl -s "https://api.telegram.org/bot<TOKEN>/getUpdates" | tr ',' '\n' | grep -A2 '"chat"'
 ```
 
-Nella risposta cerca `"chat":{"id":...}`: quel numero è il tuo `chat_id`. È un intero, di
-solito 9-10 cifre, e può essere negativo se un giorno userai un gruppo invece della chat
-personale.
+Il `chat_id` è un intero, di solito 9-10 cifre; sarà negativo se un giorno userai un gruppo
+invece della chat personale.
 
-Se `getUpdates` restituisce una lista vuota, il messaggio del punto 2 non è arrivato:
-controlla di aver scritto **al tuo bot** e non a BotFather.
+Se non stampa nulla (o `getUpdates` restituisce una lista vuota) il messaggio del punto 2
+non è arrivato: controlla di aver scritto **al tuo bot** e non a BotFather.
+
+> **Se il token ti è sfuggito** — incollato in una chat, in un log, in uno screenshot —
+> rigeneralo: `/revoke` su BotFather, scegli il bot, e ricevi un token nuovo mentre il
+> vecchio smette di funzionare all'istante. **Il `chat_id` non cambia**, perché identifica
+> la tua chat e non il bot: puoi recuperarlo prima e revocare dopo, senza rifare il giro.
 
 ### 3. Metterli sul Raspberry
 
@@ -2526,9 +2543,8 @@ EOF
 Sostituisci i due valori con i tuoi. Verifica che siano stati letti correttamente, senza
 stamparli:
 
-```bash
-ssh as@192.168.1.12 'set -a; . /opt/orto-digitale/.env; set +a; \
-  echo "token: ${#TELEGRAM_BOT_TOKEN} caratteri"; echo "chat_id: ${#TELEGRAM_CHAT_ID} cifre"'
+```
+ssh as@192.168.1.12 'set -a; . /opt/orto-digitale/.env; set +a; echo "token: ${#TELEGRAM_BOT_TOKEN} caratteri"; echo "chat_id: ${#TELEGRAM_CHAT_ID} cifre"'
 ```
 
 Attesi: un token di **44-46 caratteri** (l'id numerico del bot, i due punti, e 34 caratteri
@@ -2539,16 +2555,14 @@ ha un errore di battitura.
 
 Prima senza inviare nulla — deve stampare i messaggi e `inviati=0`:
 
-```bash
-ssh as@192.168.1.12 'set -a; . /opt/orto-digitale/.env; set +a; \
-  cd /opt/orto-digitale/scripts && python3 -m orto_notify --once --dry-run'
+```
+ssh as@192.168.1.12 'set -a; . /opt/orto-digitale/.env; set +a; cd /opt/orto-digitale/scripts && python3 -m orto_notify --once --dry-run'
 ```
 
 Poi per davvero. Questo **manda il messaggio sul telefono**:
 
-```bash
-ssh as@192.168.1.12 'set -a; . /opt/orto-digitale/.env; set +a; \
-  cd /opt/orto-digitale/scripts && python3 -m orto_notify --once'
+```
+ssh as@192.168.1.12 'set -a; . /opt/orto-digitale/.env; set +a; cd /opt/orto-digitale/scripts && python3 -m orto_notify --once'
 ```
 
 Deve stampare `inviati=1` (o più) e il messaggio deve comparire in chat. Allo stato attuale
