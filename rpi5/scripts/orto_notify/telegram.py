@@ -5,13 +5,13 @@ import urllib.request
 
 from orto_notify import TELEGRAM_MAX_CHAR, TELEGRAM_URL
 
-TIMEOUT_S = 15
+TELEGRAM_TIMEOUT_S = 15
 
 
 def _trasporto_http(url, payload):
     dati = urllib.parse.urlencode(payload).encode("utf-8")
     req = urllib.request.Request(url, data=dati, method="POST")
-    with urllib.request.urlopen(req, timeout=TIMEOUT_S) as resp:
+    with urllib.request.urlopen(req, timeout=TELEGRAM_TIMEOUT_S) as resp:
         return resp.read().decode("utf-8")
 
 

@@ -9,6 +9,7 @@ from statistics import median
 
 from orto_notify import (
     BATTERIA_BASSA_V,
+    BATTERIA_FINESTRA_GIORNI,
     BATTERIA_GIORNI_CONFERMA,
     BATTERIA_LETTURE_CONFERMA,
     BATTERIA_PENDENZA_V_SETT,
@@ -18,13 +19,12 @@ from orto_notify import (
     IF_ORE_CONFERMA,
     IF_ORE_FINESTRA,
     IF_SEED,
+    MIN_RIGHE_ADDESTRAMENTO,
     ORE_BLOCCATE,
     SILENZIO_MIN,
 )
 from orto_notify.features import COLONNE, matrice
 from orto_notify.influx import dentro_finestra
-
-MIN_RIGHE_ADDESTRAMENTO = 200
 
 
 def _pendenza_settimanale(punti):
@@ -102,7 +102,7 @@ def guardie(righe, adesso, finestre, ultimi=None):
             })
 
         # --- G3: batteria in calo -------------------------------------------
-        soglia_giorni = adesso - timedelta(days=7)
+        soglia_giorni = adesso - timedelta(days=BATTERIA_FINESTRA_GIORNI)
         punti = [(r["ora"], r["batteria"]) for r in serie
                  if r["ora"] >= soglia_giorni and r.get("batteria")]
         if len(punti) >= 24 * BATTERIA_GIORNI_CONFERMA:
@@ -195,7 +195,14 @@ def anomalie_modello(righe, adesso, finestre):
             if not valori_normali:
                 continue
             atteso = median(valori_normali)
-            spiegazione[colonna] = (round(float(campione[colonna]), 2), round(float(atteso), 2))
+            valore_r = round(float(campione[colonna]), 2)
+            atteso_r = round(float(atteso), 2)
+            # Una feature identica al suo valore normale (agli stessi due
+            # decimali mostrati nel messaggio) non distingue nulla: mostrarla
+            # come "1.00 (di solito 1.00)" e' rumore travestito da indizio.
+            if valore_r == atteso_r:
+                continue
+            spiegazione[colonna] = (valore_r, atteso_r)
         fuori.append({
             "sensor_id": sonda, "tipo": "anomalia", "ora": campione["ora"],
             "dettagli": {

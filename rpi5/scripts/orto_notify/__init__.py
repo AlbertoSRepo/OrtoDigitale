@@ -26,6 +26,7 @@ BATTERIA_BASSA_V = 1.15       # G2: soglia di avviso
 BATTERIA_CRITICA_V = 1.10     # soglia di produzione (n-fn-parse), solo riferimento
 BATTERIA_LETTURE_CONFERMA = 3
 BATTERIA_PENDENZA_V_SETT = -0.02   # G3: pendenza su 7 giorni
+BATTERIA_FINESTRA_GIORNI = 7       # G3: ampiezza della finestra di regressione
 BATTERIA_GIORNI_CONFERMA = 3
 ORE_BLOCCATE = 12             # G4
 DELTA_SORELLA_PP = 3.0        # G4: variazione minima di un'altra sonda
@@ -36,6 +37,7 @@ IF_CONTAMINAZIONE = 0.02
 IF_SEED = 0                   # riproducibilita': stesso input, stesso esito
 IF_ORE_FINESTRA = 6
 IF_ORE_CONFERMA = 3
+MIN_RIGHE_ADDESTRAMENTO = 200  # sotto questa soglia il modello non si addestra
 
 # --- Anti-spam (spec §4.5) --------------------------------------------------
 COOLDOWN_ORE = {
@@ -50,11 +52,13 @@ ORE_NORMALITA_PER_RESET = 6
 # --- Esclusione irrigazione (spec §3/D7) ------------------------------------
 ESCLUSIONE_PRIMA_MIN = 30
 ESCLUSIONE_DOPO_MIN = 120
+FINESTRE_IRRIGAZIONE_GIORNI = 2   # quanti giorni di eventi valvola leggere ogni ciclo
 
 # --- Telegram ---------------------------------------------------------------
 TELEGRAM_URL = "https://api.telegram.org/bot{token}/sendMessage"
 TELEGRAM_MAX_CHAR = 4096
-TELEGRAM_MAX_MSG_ORA = 20     # cap difensivo contro noi stessi, non contro Telegram
+# Nessun cap difensivo sul numero di messaggi/ora: il volume e' gia' delimitato
+# dal timer ogni 15 minuti e dal cooldown per (sonda, tipo) in COOLDOWN_ORE.
 
 # --- Stato ------------------------------------------------------------------
 STATO_PATH = "/opt/orto-digitale/notify/state.json"

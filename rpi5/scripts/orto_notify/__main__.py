@@ -10,6 +10,7 @@ import sys
 from datetime import datetime, timezone
 
 from orto_notify import (
+    FINESTRE_IRRIGAZIONE_GIORNI,
     GIORNI_ADDESTRAMENTO,
     INFLUX_TOKEN_ENV,
     SONDE,
@@ -38,7 +39,7 @@ def ciclo(token_influx, token_tg, chat_id, adesso=None, dry_run=False,
 
     try:
         righe = leggi_serie(token_influx, giorni)
-        finestre = leggi_finestre(token_influx, 2)
+        finestre = leggi_finestre(token_influx, FINESTRE_IRRIGAZIONE_GIORNI)
         ultimi = leggi_ultimi(token_influx)
     except Exception as e:
         print("[notify] InfluxDB non raggiungibile: %s" % e, file=sys.stderr)
@@ -65,10 +66,14 @@ def ciclo(token_influx, token_tg, chat_id, adesso=None, dry_run=False,
                 if r.get("batteria")
             },
             "aiuola": AIUOLE,
+            # Quante sonde sono mute nello stesso ciclo: un guasto al GW3000
+            # o al broker fa cadere tutte insieme, e il messaggio deve dirlo
+            # invece di rassicurare a vuoto (spec, vedi messages.componi).
+            "sonde_mute": len({a["sensor_id"] for a in anomalie if a["tipo"] == "muta"}),
         }
 
-        testi = [messages.componi(a, contesto) for a in da_inviare]
-        testi += [messages.rientro(s) for s in tornate]
+        da_inviare_testi = [(a, messages.componi(a, contesto)) for a in da_inviare]
+        rientri_testi = [messages.rientro(s) for s in tornate]
     except Exception as e:
         # Stato in memoria inaffidabile a meta' rilevazione: non salvare,
         # si riparte dall'ultimo stato buono al prossimo giro.
@@ -76,7 +81,25 @@ def ciclo(token_influx, token_tg, chat_id, adesso=None, dry_run=False,
         return {"anomalie": 0, "inviati": 0, "righe": len(righe)}
 
     inviati = 0
-    for testo in testi:
+    for anomalia, testo in da_inviare_testi:
+        if dry_run:
+            print("--- messaggio (non inviato) ---")
+            print(testo)
+            continue
+        try:
+            n = telegram.invia(testo, token_tg, chat_id, trasporto=invio)
+        except Exception as e:
+            # Telegram giu' non deve impedire di aggiornare lo stato.
+            print("[notify] invio fallito: %s" % e, file=sys.stderr)
+            n = 0
+        if n:
+            # Solo un invio davvero riuscito attiva il cooldown (spec §D8):
+            # telegram.invia() ritorna 0 sia su eccezione catturata sopra
+            # sia, senza sollevare, quando Telegram non ha confermato.
+            confirm.conferma_invio(stato_nuovo, anomalia, adesso)
+        inviati += n
+
+    for testo in rientri_testi:
         if dry_run:
             print("--- messaggio (non inviato) ---")
             print(testo)
@@ -84,11 +107,17 @@ def ciclo(token_influx, token_tg, chat_id, adesso=None, dry_run=False,
         try:
             inviati += telegram.invia(testo, token_tg, chat_id, trasporto=invio)
         except Exception as e:
-            # Telegram giu' non deve impedire di aggiornare lo stato.
             print("[notify] invio fallito: %s" % e, file=sys.stderr)
 
     if not dry_run:
-        state.salva(stato_path, stato_nuovo)
+        try:
+            state.salva(stato_path, stato_nuovo)
+        except Exception as e:
+            # "Non solleva mai" (vedi docstring): un giro che non riesce a
+            # persistere lo stato deve comunque tornare il suo risultato,
+            # non far cadere il chiamante. Nel peggiore dei casi si ripete
+            # un avviso gia' visto al giro successivo, mai il contrario.
+            print("[notify] salvataggio stato fallito: %s" % e, file=sys.stderr)
 
     return {"anomalie": len(anomalie), "inviati": inviati, "righe": len(righe)}
 
@@ -140,6 +169,11 @@ def _backtest(token_influx, giorni):
         trovate += detect.anomalie_modello(finestra, istante, finestre)
         da_inviare, stato = confirm.filtra(trovate, stato, istante)
         for a in da_inviare:
+            # Il backtest non invia per davvero: ogni candidato eleggibile
+            # si considera consegnato, cosi' il cooldown simulato si
+            # comporta come in produzione (altrimenti si riconterebbe lo
+            # stesso alert a ogni ora finche' l'anomalia persiste).
+            confirm.conferma_invio(stato, a, istante)
             chiave = (a["sensor_id"], a["tipo"])
             conteggi[chiave] = conteggi.get(chiave, 0) + 1
         istante += timedelta(hours=1)

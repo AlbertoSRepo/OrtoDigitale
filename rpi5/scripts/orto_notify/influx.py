@@ -12,7 +12,7 @@ from orto_notify import (
     INFLUX_URL,
 )
 
-TIMEOUT_S = 20
+INFLUX_TIMEOUT_S = 20
 
 # Aggregato orario di un campo, con la funzione richiesta.
 # Raggruppa SOLO per sensor_id: aiuola/position sono inaffidabili sui punti
@@ -61,7 +61,7 @@ from(bucket: "{bucket}")
 
 def _trasporto_http(url, headers, body):
     req = urllib.request.Request(url, data=body.encode("utf-8"), headers=headers, method="POST")
-    with urllib.request.urlopen(req, timeout=TIMEOUT_S) as resp:
+    with urllib.request.urlopen(req, timeout=INFLUX_TIMEOUT_S) as resp:
         return resp.read().decode("utf-8")
 
 

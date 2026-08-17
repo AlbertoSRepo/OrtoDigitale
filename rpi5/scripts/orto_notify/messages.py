@@ -3,7 +3,9 @@
 Testo semplice: niente Markdown, niente HTML. WH51_01 contiene un underscore
 e con parse_mode Markdown Telegram risponde 400 Bad Request.
 """
-from orto_notify import BATTERIA_CRITICA_V
+from zoneinfo import ZoneInfo
+
+from orto_notify import BATTERIA_CRITICA_V, SONDE
 
 NOMI_FEATURE = {
     "tasso_consegna": "consegna pacchetti",
@@ -17,7 +19,21 @@ NOMI_FEATURE = {
 
 
 def _ora(dt):
-    return dt.strftime("%H:%M")
+    """Formatta un istante come ora locale HH:MM.
+
+    `dt` arriva sempre timezone-aware in UTC (da InfluxDB o da `adesso()`):
+    formattarlo cosi' com'e' stamperebbe l'ora UTC, non quella che il
+    lettore vede sul suo orologio a Europe/Rome (impostare TZ nell'
+    EnvironmentFile di systemd non serve: non ha effetto su un datetime gia'
+    consapevole del fuso). zoneinfo e' stdlib, ma il database IANA puo'
+    mancare su un sistema minimale: in quel caso si ripiega sul fuso di
+    sistema, cosi' questa funzione non solleva mai.
+    """
+    try:
+        locale = dt.astimezone(ZoneInfo("Europe/Rome"))
+    except Exception:
+        locale = dt.astimezone()
+    return locale.strftime("%H:%M")
 
 
 def _altre_batterie(sonda, contesto):
@@ -34,7 +50,7 @@ def componi(anomalia, contesto):
     if tipo == "muta":
         quanto = d.get("silenzio_min")
         da_quando = ("da %d minuti" % quanto) if quanto else "da un tempo imprecisato"
-        return "\n".join([
+        intestazione = [
             "Sonda muta: %s" % sonda,
             "",
             "Nessun dato %s (%s)." % (da_quando, dove),
@@ -44,12 +60,31 @@ def componi(anomalia, contesto):
             "Batteria all'ultima lettura: %s V (le altre: %s)." % (
                 _fmt(d.get("batteria")), _altre_batterie(sonda, contesto)),
             "",
+        ]
+
+        # Quante sonde sono mute in questo stesso ciclo: se sono tutte,
+        # il problema non e' questa sonda ma qualcosa a monte (GW3000,
+        # Mosquitto), e in quel caso non c'e' nessuna "altra" sonda a cui
+        # appoggiarsi. Dirlo esplicitamente evita di rassicurare a vuoto.
+        if (contesto.get("sonde_mute") or 0) >= len(SONDE):
+            return "\n".join(intestazione + [
+                "Sono mute tutte le sonde insieme: non e' un problema di",
+                "questa sonda in particolare. Il sospetto principale e' un",
+                "guasto a monte, il gateway GW3000 o il broker MQTT.",
+                "",
+                "Senza nessuna sonda che trasmette la lettura di umidita'",
+                "non e' affidabile: non fidartene finche' non ricominciano",
+                "a trasmettere.",
+            ])
+
+        return "\n".join(intestazione + [
             "Cosa puo' essere, dalla piu' probabile:",
             "1) Batteria in esaurimento.",
             "2) Portata radio verso il GW3000.",
             "3) Sonda spostata o urtata.",
             "",
-            "Il sistema continua a irrigare usando le altre (ne bastano due).",
+            "Le altre sonde continuano a trasmettere: il sistema puo'",
+            "ancora irrigare basandosi su quelle.",
         ])
 
     if tipo == "batteria_bassa":

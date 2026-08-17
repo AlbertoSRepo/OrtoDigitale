@@ -16,6 +16,13 @@ def filtra(anomalie, stato, adesso):
     """Restituisce (da_notificare, stato_aggiornato).
 
     Lo stato e' {sonda: {tipo: {"ultimo_invio": iso, "ultimo_visto": iso}}}.
+
+    Decide soltanto chi e' eleggibile per il cooldown: NON scrive
+    "ultimo_invio". Scriverlo qui, prima che il messaggio sia davvero
+    partito, brucerebbe il cooldown anche quando l'invio fallisce (spec
+    §D8: un invio fallito deve poter riprovare al giro successivo). E'
+    compito del chiamante confermare un invio riuscito con
+    `conferma_invio()`, dopo aver verificato che sia arrivato a destinazione.
     """
     stato = {s: {t: dict(v) for t, v in tipi.items()} for s, tipi in stato.items()}
     presenti = {(a["sensor_id"], a["tipo"]) for a in anomalie}
@@ -41,10 +48,21 @@ def filtra(anomalie, stato, adesso):
         cooldown = timedelta(hours=COOLDOWN_ORE.get(tipo, 24))
         if ultimo and adesso - ultimo < cooldown:
             continue
-        voce["ultimo_invio"] = adesso.isoformat()
         da_notificare.append(a)
 
     return da_notificare, stato
+
+
+def conferma_invio(stato, anomalia, adesso):
+    """Registra che il messaggio per questa anomalia e' stato davvero consegnato.
+
+    Va chiamata SOLO dopo che l'invio ha avuto successo (`telegram.invia()`
+    ha restituito un conteggio > 0): un invio fallito o non tentato non deve
+    attivare il cooldown, altrimenti l'allerta resta silenziata per ore o
+    giorni senza che l'utente l'abbia mai vista (spec §D8).
+    """
+    voce = stato.setdefault(anomalia["sensor_id"], {}).setdefault(anomalia["tipo"], {})
+    voce["ultimo_invio"] = adesso.isoformat()
 
 
 def rientri(anomalie, stato, adesso):

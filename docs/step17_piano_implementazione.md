@@ -2391,23 +2391,26 @@ pena conoscerli perché sono facili da reintrodurre:
 
 ## Verifica finale (checklist)
 
-- [x] `python3 -m orto_notify.selftest` → **56 passati, 0 falliti** (53 del piano + 3 aggiunti dai fix di produzione)
+- [x] `python3 -m orto_notify.selftest` → **63 passati, 0 falliti** (53 del piano + 3 dai fix di produzione + 7 dalla fix wave della review finale, prima del merge)
 - [x] I test Node-RED sono ancora verdi — **148 su 8 file**, non 126: nel frattempo un'altra sessione ha aggiunto `id_fisici.test.mjs` (16) e ampliato `registro_sensori.test.mjs` (23 → 29). Il criterio è «tutti verdi», non un numero fisso, perché un conteggio assoluto è fragile quando due sessioni lavorano sullo stesso repo
 - [x] `git diff main --name-only` **non** contiene `flows.json`, `irrigation_config.json`, `docker-compose.yml`, né file del frontend
 - [x] `--backtest` rispetta il criterio: < 1 alert/settimana per sonda sana, ≥ 1 su WH51_01 — vedi §Taratura della spec
 - [x] `--dry-run` sul RPi stampa senza inviare
-- [ ] **Un messaggio vero è arrivato sul telefono** — bloccato: manca il bot, vedi §Come creare il bot
-- [ ] **`systemctl list-timers` mostra `orto-notify.timer` armato** — bloccato dallo stesso motivo
+- [x] **Un messaggio vero è arrivato sul telefono** — 2026-08-17, batteria di `WH51_01` in calo (vedi §Come creare il bot)
+- [x] **`systemctl list-timers` mostra `orto-notify.timer` armato** — attivo dal 2026-08-17, gira ogni 15 minuti
 - [x] `verify_rpi5.sh` verde e i sei container `Up` senza riavvii
 - [x] Nessun token compare nel repo
-- [ ] Le quattro correzioni a `CLAUDE.md` sono applicate — task 11, ancora da fare
+- [x] Le quattro correzioni a `CLAUDE.md` sono applicate — task 11, commit `0b0df35`
 
 ---
 
 ## Stato al 2026-08-17
 
-**Dieci task su undici completi.** Il servizio è installato e verificato sul Raspberry, ma
-non invia ancora: manca il bot Telegram, che va creato a mano (sezione successiva).
+**Undici task su undici completi.** Il servizio è installato, il bot Telegram è
+configurato e `orto-notify.timer` gira ogni 15 minuti dal 2026-08-17; il primo messaggio
+vero (batteria di `WH51_01` in calo) è stato consegnato quel giorno. La procedura seguita
+per creare il bot resta documentata nella sezione successiva, per il prossimo che dovrà
+rifarla (es. dopo un `/revoke` del token).
 
 | Task | Stato | Commit |
 |---|---|---|
@@ -2421,9 +2424,9 @@ non invia ancora: manca il bot Telegram, che va creato a mano (sezione successiv
 | 7 Messaggi e Telegram | ✅ pulito al primo giro | `73f7dd1` |
 | 8 Orchestrazione e CLI | ✅ dopo 1 fix | `e02fe50`, `192d34c` |
 | 9 Taratura | ✅ nessuna soglia cambiata | `f071dc3` |
-| 10 Deploy | ✅ parziale — timer non attivato | `af2b3b3` |
+| 10 Deploy | ✅ timer attivo, primo messaggio consegnato | `af2b3b3` |
 | — Fix da dati reali | ✅ | `e1ff64b` |
-| 11 Documentazione | ⏳ da fare | — |
+| 11 Documentazione | ✅ | `0b0df35` |
 
 ### I due bug che solo i dati reali hanno rivelato
 

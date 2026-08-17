@@ -479,9 +479,13 @@ def _sezione_modello():
                 r["tasso_consegna"] = 0.1
                 r["silenzio_max_min"] = 40.0
         out = detect.anomalie_modello(righe, ADESSO, [])
-        if out:
-            assert out[0]["dettagli"]["spiegazione"], out[0]
-            assert out[0]["dettagli"]["su_ore"] == IF_ORE_FINESTRA
+        # Verificato su scikit-learn 1.4.2 (RPi, produzione) e 1.9.0 (sviluppo):
+        # nessuna divergenza fra le due versioni su questo scenario, quindi
+        # l'asserzione non e' condizionale "if out:" -- un test verde che non
+        # ha prodotto nessuna anomalia non ha verificato nulla.
+        assert out, "l'anomalia doveva essere rilevata, non solo la spiegazione"
+        assert out[0]["dettagli"]["spiegazione"], out[0]
+        assert out[0]["dettagli"]["su_ore"] == IF_ORE_FINESTRA
 
     prova("una sonda che devia viene segnalata", sonda_deviante_viene_segnalata)
     prova("popolazione omogenea: nessun allarme", popolazione_omogenea_non_produce_allarmi)
@@ -508,22 +512,37 @@ def _sezione_conferma():
     def secondo_alert_entro_cooldown_soppresso():
         da_inviare, stato = confirm.filtra([anomalia()], {}, ADESSO)
         assert len(da_inviare) == 1
+        confirm.conferma_invio(stato, da_inviare[0], ADESSO)
         dopo, _ = confirm.filtra([anomalia()], stato, ADESSO + timedelta(hours=3))
         assert dopo == [], dopo
 
     def dopo_il_cooldown_riparte():
-        _, stato = confirm.filtra([anomalia()], {}, ADESSO)
+        da_inviare, stato = confirm.filtra([anomalia()], {}, ADESSO)
+        confirm.conferma_invio(stato, da_inviare[0], ADESSO)
         dopo, _ = confirm.filtra([anomalia()], stato, ADESSO + timedelta(hours=25))
         assert len(dopo) == 1, dopo
 
     def cooldown_batteria_calo_e_settimanale():
-        _, stato = confirm.filtra([anomalia(tipo="batteria_calo")], {}, ADESSO)
+        da_inviare, stato = confirm.filtra([anomalia(tipo="batteria_calo")], {}, ADESSO)
+        confirm.conferma_invio(stato, da_inviare[0], ADESSO)
         a_2_giorni, _ = confirm.filtra(
             [anomalia(tipo="batteria_calo")], stato, ADESSO + timedelta(days=2))
         assert a_2_giorni == [], a_2_giorni
         a_8_giorni, _ = confirm.filtra(
             [anomalia(tipo="batteria_calo")], stato, ADESSO + timedelta(days=8))
         assert len(a_8_giorni) == 1
+
+    def filtra_non_registra_linvio_da_sola():
+        # Nucleo del fix: filtra() decide chi e' eleggibile ma NON scrive
+        # "ultimo_invio". Senza conferma_invio() esplicita (che simula un
+        # invio Telegram riuscito), lo stesso alert deve restare eleggibile
+        # anche ore dopo: e' cosi' che un invio fallito puo' riprovare al
+        # giro successivo invece di bruciare il cooldown a vuoto (spec §D8).
+        da_inviare, stato = confirm.filtra([anomalia()], {}, ADESSO)
+        assert len(da_inviare) == 1
+        # NON si chiama conferma_invio: l'invio e' fallito o non tentato.
+        ancora, _ = confirm.filtra([anomalia()], stato, ADESSO + timedelta(hours=3))
+        assert len(ancora) == 1, ancora
 
     def tipi_diversi_non_si_zittiscono():
         _, stato = confirm.filtra([anomalia(tipo="muta")], {}, ADESSO)
@@ -536,14 +555,16 @@ def _sezione_conferma():
         assert len(altra) == 1, altra
 
     def normalita_prolungata_azzera():
-        _, stato = confirm.filtra([anomalia()], {}, ADESSO)
+        da_inviare, stato = confirm.filtra([anomalia()], {}, ADESSO)
+        confirm.conferma_invio(stato, da_inviare[0], ADESSO)
         # sei ore senza anomalie
         _, stato = confirm.filtra([], stato, ADESSO + timedelta(hours=7))
         di_nuovo, _ = confirm.filtra([anomalia()], stato, ADESSO + timedelta(hours=8))
         assert len(di_nuovo) == 1, di_nuovo
 
     def rientro_segnalato_una_volta_sola():
-        _, stato = confirm.filtra([anomalia()], {}, ADESSO)
+        da_inviare, stato = confirm.filtra([anomalia()], {}, ADESSO)
+        confirm.conferma_invio(stato, da_inviare[0], ADESSO)
         tornate = confirm.rientri([], stato, ADESSO + timedelta(hours=7))
         assert "WH51_01" in tornate, tornate
         _, stato2 = confirm.filtra([], stato, ADESSO + timedelta(hours=7))
@@ -565,6 +586,7 @@ def _sezione_conferma():
     prova("il secondo entro 24 h e' soppresso", secondo_alert_entro_cooldown_soppresso)
     prova("dopo il cooldown riparte", dopo_il_cooldown_riparte)
     prova("batteria_calo ha cooldown di 7 giorni", cooldown_batteria_calo_e_settimanale)
+    prova("filtra() da sola non registra l'invio: senza conferma resta eleggibile", filtra_non_registra_linvio_da_sola)
     prova("tipi diversi non si zittiscono a vicenda", tipi_diversi_non_si_zittiscono)
     prova("sonde diverse non si zittiscono a vicenda", sonde_diverse_non_si_zittiscono)
     prova("sei ore di normalita' azzerano il cooldown", normalita_prolungata_azzera)
@@ -575,7 +597,7 @@ def _sezione_conferma():
 
 def _sezione_messaggi():
     from datetime import datetime, timezone
-    from orto_notify import messages, telegram, TELEGRAM_MAX_CHAR
+    from orto_notify import messages, telegram, SONDE, TELEGRAM_MAX_CHAR
 
     print("messaggi e telegram")
 
@@ -593,6 +615,19 @@ def _sezione_messaggi():
         assert "WH51_01" in testo
         assert "52" in testo
         assert "1.51" in testo
+
+    def ora_e_locale_non_utc():
+        # 2026-08-17 e' in ora legale: Europe/Rome = UTC+2 (CEST). Un istante
+        # delle 12:12 UTC deve comparire nel messaggio come 14:12, l'ora che
+        # il lettore vede sul proprio orologio -- non come 12:12, che e'
+        # quello che strftime() su un aware-UTC stamperebbe senza conversione.
+        istante_utc = datetime(2026, 8, 17, 12, 12, tzinfo=timezone.utc)
+        testo = messages.componi(
+            {"sensor_id": "WH51_01", "tipo": "muta", "ora": istante_utc,
+             "dettagli": {"silenzio_min": 52, "ultima_lettura": 47.0, "batteria": 1.51}},
+            CONTESTO)
+        assert "14:12" in testo, testo
+        assert "12:12" not in testo, testo
 
     def niente_costrutti_markdown():
         # ATTENZIONE: NON si puo' pretendere l'assenza di "_", perche' i nomi
@@ -624,6 +659,33 @@ def _sezione_messaggi():
                           "spiegazione": {"scarto_da_sorelle": (11.0, 3.0)}}},
             CONTESTO)
         assert "osservazione" in testo.lower(), testo
+
+    def muta_singola_rassicura_sulle_altre():
+        # Una sola sonda muta: il messaggio puo' legittimamente dire che le
+        # altre coprono. Il numero esatto ("due") non va nominato: e' il
+        # min_quorum di Node-RED, editabile a runtime via HTTP/MQTT, e
+        # questo servizio non legge quella configurazione di proposito.
+        contesto = dict(CONTESTO, sonde_mute=1)
+        testo = messages.componi(
+            {"sensor_id": "WH51_01", "tipo": "muta", "ora": ORA,
+             "dettagli": {"silenzio_min": 52, "ultima_lettura": 47.0, "batteria": 1.51}},
+            contesto)
+        assert "ne bastano due" not in testo.lower(), testo
+        assert "continuano a trasmettere" in testo.lower(), testo
+
+    def muta_tutte_insieme_non_rassicura_e_indica_gw3000():
+        # Le quattro sonde mute nello stesso ciclo: il gateway o il broker
+        # sono il sospetto, non le singole sonde, e non c'e' nessuna "altra"
+        # sonda a cui appoggiarsi -- il messaggio non deve fingere ce ne sia.
+        contesto = dict(CONTESTO, sonde_mute=len(SONDE))
+        testo = messages.componi(
+            {"sensor_id": "WH51_01", "tipo": "muta", "ora": ORA,
+             "dettagli": {"silenzio_min": 52, "ultima_lettura": 47.0, "batteria": 1.51}},
+            contesto)
+        assert "ne bastano due" not in testo.lower(), testo
+        assert "continuano a trasmettere" not in testo.lower(), testo
+        assert "gw3000" in testo.lower() or "broker" in testo.lower(), testo
+        assert "non e' affidabile" in testo.lower() or "non fidart" in testo.lower(), testo
 
     def batteria_calo_dichiara_la_riserva():
         testo = messages.componi(
@@ -664,8 +726,11 @@ def _sezione_messaggi():
         assert n == 0, n
 
     prova("il messaggio di sonda muta porta i numeri", muta_nomina_i_numeri)
+    prova("l'ora nel messaggio e' locale (Europe/Rome), non UTC", ora_e_locale_non_utc)
     prova("nessun messaggio usa costrutti Markdown", niente_costrutti_markdown)
     prova("il messaggio del modello resta cauto", anomalia_e_cauta)
+    prova("una sola sonda muta: rassicura sulle altre, senza numeri", muta_singola_rassicura_sulle_altre)
+    prova("tutte le sonde mute insieme: niente rassicurazione, sospetto sul gateway", muta_tutte_insieme_non_rassicura_e_indica_gw3000)
     prova("la proiezione batteria dichiara la riserva", batteria_calo_dichiara_la_riserva)
     prova("testo breve resta un messaggio", spezza_sotto_il_limite)
     prova("testo lungo si spezza senza perdere nulla", spezza_sopra_il_limite)
@@ -739,8 +804,86 @@ def _sezione_ciclo():
         assert esito["righe"] == 0, esito
         assert esito["inviati"] == 0, esito
 
+    def invio_fallito_non_brucia_il_cooldown():
+        # Nucleo dell'Important 1, verificato end-to-end attraverso ciclo():
+        # telegram.invia() non solleva su un fallimento, restituisce 0 (e'
+        # cosi' che si comporta anche senza token, vedi telegram.py). Se
+        # ciclo() confermasse comunque l'invio, il secondo giro non
+        # ritenterebbe: qui si prova che invece ritenta.
+        chiamate = {"n": 0}
+
+        def fallisce(url, payload):
+            chiamate["n"] += 1
+            return '{"ok":false}'
+
+        t = trasporti(serie_finta(muta=True), muta=True)
+        t["telegram"] = fallisce
+        stato_path = "/tmp/orto_notify_ciclo_3.json"
+        if os.path.exists(stato_path):
+            os.remove(stato_path)
+
+        esito1 = principale.ciclo("TI", "TT", "42", adesso=ADESSO, trasporti=t,
+                                  stato_path=stato_path)
+        assert esito1["inviati"] == 0, esito1
+        assert chiamate["n"] == 1, chiamate
+
+        esito2 = principale.ciclo("TI", "TT", "42", adesso=ADESSO + timedelta(minutes=15),
+                                  trasporti=t, stato_path=stato_path)
+        assert esito2["anomalie"] >= 1, esito2
+        # Se il primo tentativo fallito avesse bruciato il cooldown, qui non
+        # ci sarebbe un secondo tentativo di invio.
+        assert chiamate["n"] == 2, chiamate
+        os.remove(stato_path)
+
+    def state_salva_fallito_non_fa_cadere_il_ciclo():
+        # Important 2: state.salva() e' fuori dal try/except di rilevazione.
+        # "Non solleva mai" (docstring di ciclo()) deve valere anche quando
+        # il disco che ospita state.json e' pieno o senza permessi.
+        from orto_notify import state as state_mod
+
+        originale = state_mod.salva
+
+        def esplode(path, stato):
+            raise OSError("disco pieno")
+
+        state_mod.salva = esplode
+        try:
+            t = trasporti(serie_finta(muta=True), muta=True)
+            esito = principale.ciclo("TI", "TT", "42", adesso=ADESSO, trasporti=t,
+                                     stato_path="/tmp/orto_notify_ciclo_4.json")
+            assert esito["inviati"] >= 1, esito
+        finally:
+            state_mod.salva = originale
+
+    def tutte_le_sonde_mute_cambia_messaggio():
+        # Important 4, end-to-end: quando le quattro sonde tacciono nello
+        # stesso ciclo, ciclo() deve popolare contesto["sonde_mute"] = 4 e
+        # ogni messaggio di sonda muta deve riflettere il guasto a monte,
+        # non la rassicurazione "ne bastano due".
+        sonde = ("WH51_01", "WH51_02", "WH51_03", "WH51_04")
+        righe = serie_finta(muta=False)
+        ultimi = {s: ADESSO - timedelta(minutes=70) for s in sonde}
+        inviati = []
+        t = {
+            "serie": lambda *a, **k: righe,
+            "finestre": lambda *a, **k: [],
+            "ultimi": lambda *a, **k: ultimi,
+            "telegram": lambda url, payload: (inviati.append(payload) or '{"ok":true}'),
+        }
+        stato_path = "/tmp/orto_notify_ciclo_5.json"
+        if os.path.exists(stato_path):
+            os.remove(stato_path)
+        principale.ciclo("TI", "TT", "42", adesso=ADESSO, trasporti=t, stato_path=stato_path)
+        messaggi_muta = [p["text"] for p in inviati if p["text"].startswith("Sonda muta:")]
+        assert len(messaggi_muta) == 4, messaggi_muta
+        for testo in messaggi_muta:
+            assert "ne bastano due" not in testo.lower(), testo
+            assert "gw3000" in testo.lower() or "broker" in testo.lower(), testo
+        os.remove(stato_path)
+
     import os
-    for f in ("/tmp/orto_notify_ciclo_0.json", "/tmp/orto_notify_ciclo_1.json", "/tmp/orto_notify_ciclo_2.json"):
+    for f in ("/tmp/orto_notify_ciclo_0.json", "/tmp/orto_notify_ciclo_1.json", "/tmp/orto_notify_ciclo_2.json",
+              "/tmp/orto_notify_ciclo_3.json", "/tmp/orto_notify_ciclo_4.json", "/tmp/orto_notify_ciclo_5.json"):
         if os.path.exists(f):
             os.remove(f)
 
@@ -748,6 +891,9 @@ def _sezione_ciclo():
     prova("sonda muta: un messaggio con il suo nome", sonda_muta_produce_un_messaggio)
     prova("--dry-run rileva ma non invia", dry_run_non_invia)
     prova("InfluxDB irraggiungibile non fa cadere il ciclo", influx_giu_non_esplode)
+    prova("un invio fallito non brucia il cooldown: ritenta al giro dopo", invio_fallito_non_brucia_il_cooldown)
+    prova("state.salva() fallito non fa cadere il ciclo", state_salva_fallito_non_fa_cadere_il_ciclo)
+    prova("tutte le sonde mute insieme: il messaggio indica il gateway", tutte_le_sonde_mute_cambia_messaggio)
 
 
 SEZIONI = [_sezione_influx, _sezione_features, _sezione_guardie, _sezione_modello, _sezione_conferma, _sezione_messaggi, _sezione_ciclo]
