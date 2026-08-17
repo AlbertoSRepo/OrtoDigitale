@@ -309,7 +309,80 @@ def _sezione_guardie():
     prova("senza ultimi si ripiega sui bucket orari", senza_ultimi_ripiega_sui_bucket)
 
 
-SEZIONI = [_sezione_influx, _sezione_features, _sezione_guardie]
+def _sezione_modello():
+    from datetime import datetime, timedelta, timezone
+    from orto_notify import detect, IF_ORE_FINESTRA
+
+    print("isolation forest")
+
+    ADESSO = datetime(2026, 8, 17, 12, 0, tzinfo=timezone.utc)
+
+    def normale(sonda, h, **campi):
+        r = {
+            "sensor_id": sonda, "ora": ADESSO - timedelta(hours=h),
+            "campioni": 60, "media": 50.0, "sigma": 1.2, "batteria": 1.60,
+            "silenzio_max_min": 1.0, "tasso_consegna": 1.0,
+            "delta_batteria_24h": 0.0, "scarto_da_sorelle": 0.5,
+            "ore_bloccate": 0,
+        }
+        r.update(campi)
+        return r
+
+    def popolazione():
+        righe = []
+        for sonda in ("WH51_01", "WH51_02", "WH51_03", "WH51_04"):
+            for h in range(400, 0, -1):
+                # un filo di varieta', altrimenti la deviazione e' nulla
+                righe.append(normale(sonda, h, media=50.0 + (h % 5) * 0.1))
+        return righe
+
+    def sonda_deviante_viene_segnalata():
+        righe = popolazione()
+        for r in righe:
+            if r["sensor_id"] == "WH51_03" and (ADESSO - r["ora"]).total_seconds() <= IF_ORE_FINESTRA * 3600:
+                r["scarto_da_sorelle"] = 18.0
+                r["sigma"] = 0.0
+                r["ore_bloccate"] = 6
+        out = detect.anomalie_modello(righe, ADESSO, [])
+        sonde = {a["sensor_id"] for a in out}
+        assert "WH51_03" in sonde, sonde
+
+    def popolazione_omogenea_non_produce_allarmi():
+        out = detect.anomalie_modello(popolazione(), ADESSO, [])
+        assert out == [], out
+
+    def esito_riproducibile():
+        righe = popolazione()
+        for r in righe:
+            if r["sensor_id"] == "WH51_02" and (ADESSO - r["ora"]).total_seconds() <= IF_ORE_FINESTRA * 3600:
+                r["scarto_da_sorelle"] = 15.0
+        a = detect.anomalie_modello(righe, ADESSO, [])
+        b = detect.anomalie_modello(righe, ADESSO, [])
+        assert [x["sensor_id"] for x in a] == [x["sensor_id"] for x in b]
+
+    def dati_insufficienti_non_esplode():
+        pochi = [normale("WH51_01", h) for h in range(5, 0, -1)]
+        assert detect.anomalie_modello(pochi, ADESSO, []) == []
+
+    def spiegazione_presente():
+        righe = popolazione()
+        for r in righe:
+            if r["sensor_id"] == "WH51_04" and (ADESSO - r["ora"]).total_seconds() <= IF_ORE_FINESTRA * 3600:
+                r["tasso_consegna"] = 0.1
+                r["silenzio_max_min"] = 40.0
+        out = detect.anomalie_modello(righe, ADESSO, [])
+        if out:
+            assert out[0]["dettagli"]["spiegazione"], out[0]
+            assert out[0]["dettagli"]["su_ore"] == IF_ORE_FINESTRA
+
+    prova("una sonda che devia viene segnalata", sonda_deviante_viene_segnalata)
+    prova("popolazione omogenea: nessun allarme", popolazione_omogenea_non_produce_allarmi)
+    prova("stesso input, stesso esito", esito_riproducibile)
+    prova("con pochi dati non esplode", dati_insufficienti_non_esplode)
+    prova("l'anomalia porta con se' la spiegazione", spiegazione_presente)
+
+
+SEZIONI = [_sezione_influx, _sezione_features, _sezione_guardie, _sezione_modello]
 
 
 if __name__ == "__main__":

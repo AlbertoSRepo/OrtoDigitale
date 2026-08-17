@@ -5,6 +5,7 @@ bloccato) — piu' affidabili e soprattutto spiegabili in un messaggio.
 L'Isolation Forest copre cio' che a regole non si esprime.
 """
 from datetime import timedelta
+from statistics import median
 
 from orto_notify import (
     BATTERIA_BASSA_V,
@@ -12,10 +13,18 @@ from orto_notify import (
     BATTERIA_LETTURE_CONFERMA,
     BATTERIA_PENDENZA_V_SETT,
     DELTA_SORELLA_PP,
+    IF_ALBERI,
+    IF_CONTAMINAZIONE,
+    IF_ORE_CONFERMA,
+    IF_ORE_FINESTRA,
+    IF_SEED,
     ORE_BLOCCATE,
     SILENZIO_MIN,
 )
+from orto_notify.features import COLONNE, matrice
 from orto_notify.influx import dentro_finestra
+
+MIN_RIGHE_ADDESTRAMENTO = 200
 
 
 def _pendenza_settimanale(punti):
@@ -130,3 +139,69 @@ def guardie(righe, adesso, finestre, ultimi=None):
                 })
 
     return anomalie
+
+
+def anomalie_modello(righe, adesso, finestre):
+    """Isolation Forest sulle sette feature, addestrato su tutte le sonde.
+
+    Il modello non decide: assegna un punteggio. La notifica parte solo se la
+    sonda risulta anomala in almeno IF_ORE_CONFERMA delle ultime
+    IF_ORE_FINESTRA ore (spec §4.5).
+    """
+    utili = [r for r in righe if not dentro_finestra(r["ora"], finestre)]
+    if len(utili) < MIN_RIGHE_ADDESTRAMENTO:
+        return []
+
+    try:
+        from sklearn.ensemble import IsolationForest
+    except ImportError:
+        # Senza sklearn le guardie deterministiche continuano a funzionare:
+        # meglio meno rilevazione che un servizio che non parte.
+        return []
+
+    X = matrice(utili)
+    modello = IsolationForest(
+        n_estimators=IF_ALBERI,
+        contamination=IF_CONTAMINAZIONE,
+        random_state=IF_SEED,
+    )
+    etichette = modello.fit_predict(X)   # -1 = anomalia, 1 = normale
+
+    limite = adesso - timedelta(hours=IF_ORE_FINESTRA)
+    conteggio = {}
+    recenti_anomale = {}
+    for riga, etichetta in zip(utili, etichette):
+        if riga["ora"] < limite:
+            continue
+        sonda = riga["sensor_id"]
+        conteggio.setdefault(sonda, 0)
+        if etichetta == -1:
+            conteggio[sonda] += 1
+            recenti_anomale.setdefault(sonda, []).append(riga)
+
+    # Mediana delle righe giudicate normali: serve a spiegare lo scostamento.
+    normali = [r for r, e in zip(utili, etichette) if e == 1]
+
+    fuori = []
+    for sonda, quante in conteggio.items():
+        if quante < IF_ORE_CONFERMA:
+            continue
+        campione = recenti_anomale[sonda][-1]
+        spiegazione = {}
+        for colonna in COLONNE:
+            valori_normali = [r[colonna] for r in normali if r["sensor_id"] == sonda]
+            if not valori_normali:
+                valori_normali = [r[colonna] for r in normali]
+            if not valori_normali:
+                continue
+            atteso = median(valori_normali)
+            spiegazione[colonna] = (round(float(campione[colonna]), 2), round(float(atteso), 2))
+        fuori.append({
+            "sensor_id": sonda, "tipo": "anomalia", "ora": campione["ora"],
+            "dettagli": {
+                "ore_anomale": quante,
+                "su_ore": IF_ORE_FINESTRA,
+                "spiegazione": spiegazione,
+            },
+        })
+    return fuori
