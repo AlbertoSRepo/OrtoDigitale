@@ -297,3 +297,15 @@ produzione.
 - Tabella **Stato avanzamento**: riga 16 passa a `✅ (fase 1 — analisi)` se il
   cancello è superato con una raccomandazione di procedere, oppure resta `⏳` con
   una nota se il cancello non è superato o servono più dati.
+
+---
+
+## Implementazione
+
+**Stato:** ✅ COMPLETATO (fase 1) — 2026-08-17
+
+**Commit di riferimento:** `docs(scripts): report del modello di bagnatura (step 16 fase 1)` (86c369a)
+
+**Note:** Attribuzione: sui 296 eventi valvola, 115 scartati come rumore (probabile acqua per altro uso), 134 candidati irrigazione, 47 scartati come ambigui (pioggia vicina). Sui 139 episodi di pioggia raggruppati, 70 scartati come rumore, 31 candidati pioggia, 38 scartati come ambigui (valvola vicina). Coefficienti ottenuti: w_irr = 0.0419 %/L (n=134, p10 0.0118, p90 0.3626), w_rain = 3.1606 %/mm (n=31, p10 0.9804, p90 26.9744). Backtest esteso a 12h: modello esteso 4.64 pp mediana (non batte baseline 3.75 pp). Raccomandazione: "Non procedere ora — servono più dati" (cause: campione pioggia al limite della guardia minima a n=31, bias statistico identificato nel rilevamento delle sorprese, beneficio positivo rimandato a storico `mode=auto` più consistente).
+
+**Deviazioni dalla spec:** Nessuna significativa. Fattore di sicurezza = 3.0 scelto con dati reali (tabella sensibilità del report), non da analisi preliminare — già documentato nel codice della Task 4. Scoperta del Report (§1): tag `trigger` riporta `auto` già dal 2026-05-03 anche in `mode=dry_run` (non solo in modalità auto), ma non invalida il metodo basato sul segnale fisico di umidità osservata — scoperta documentata nel report, fuori scope correggerla qui.
