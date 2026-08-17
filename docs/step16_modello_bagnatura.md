@@ -2,6 +2,7 @@
 
 ## Indice
 
+0. [Origine — ragionamento del 2026-08-16](#0-origine--ragionamento-del-2026-08-16)
 1. [Obiettivo](#1-obiettivo)
 2. [Stato di partenza](#2-stato-di-partenza)
 3. [Decisioni di design](#3-decisioni-di-design)
@@ -11,6 +12,49 @@
 7. [Fuori scope](#7-fuori-scope)
 8. [Verifica di completamento (fase 1)](#8-verifica-di-completamento-fase-1)
 9. [Aggiornamenti a CLAUDE.md](#9-aggiornamenti-a-claudemd)
+
+---
+
+## 0. Origine — ragionamento del 2026-08-16
+
+Ragionamento originale dell'utente, precedente alla spec formale (nato il giorno prima
+del brainstorming che ha prodotto questo documento, il 2026-08-17). Riportato qui perché
+non era stato scritto da nessuna parte al momento in cui è stato formulato — solo
+verbale — e vale la pena conservarlo come traccia di come si è arrivati alla scelta di
+design del §3/D2.
+
+> Utilizzando i dati oggi conservati nel DB, si può sviluppare un modello per capire la
+> "bagnatura" del terreno? I dati nel DB sono **sporchi**: lo sblocco manuale è sempre
+> stato usato sia per irrigare l'orto sia per prelevare acqua per altri usi — un evento
+> di apertura valvola non implica quindi che l'acqua sia arrivata al terreno.
+>
+> L'unico modo per pulire i dati sembra essere: prendere tutti gli eventi di bagnatura
+> del terreno e confrontarli con i valori di umidità nelle 2 ore successive, per capire
+> se l'acqua sia stata effettivamente usata per l'orto; poi prendere tutti gli aumenti
+> di umidità osservati e verificare che in quel momento non stesse piovendo. Obiettivo
+> finale: capire quanto sale l'umidità sia con l'irrigazione sia con la pioggia.
+
+**Cosa è rimasto invariato**: il problema (dati sporchi da sblocco manuale
+indistinguibile), l'obiettivo finale (coefficienti misurati per irrigazione e pioggia),
+e l'intuizione di base (usare la risposta di umidità osservata per attribuire un evento
+a "irrigazione vera" o "pioggia", non fidarsi dell'etichetta del record).
+
+**Cosa è stato raffinato in fase di brainstorming (§3)**: l'idea originale confrontava
+l'umidità in una finestra fissa di 2 ore dopo l'evento — un salto assoluto. Discusso
+come "Approccio B" durante il brainstorming e scartato a favore del **contro-fattuale**
+(D2): invece di guardare la salita grezza, si proietta cosa avrebbe fatto l'umidità
+*senza* alcun evento (solo asciugatura, modello `k·ET0` già validato dallo step 15) e si
+confronta col dato osservato. Il motivo del cambio: in un pomeriggio caldo l'asciugatura
+naturale può mascherare a occhio nudo una bagnatura reale ma modesta, mentre di notte una
+soglia fissa rischia falsi positivi. Il contro-fattuale isola l'effetto netto
+indipendentemente dall'ora del giorno — stessa idea di fondo, esecuzione più precisa. La
+verifica "non stava piovendo" dell'idea originale diventa l'attribuzione a due vie
+(irrigazione vs pioggia vs ambiguo vs rumore) di §4/Fase D.
+
+Anche l'ipotesi implicita di modello ML nel primo inquadramento («possiamo sviluppare un
+modello di machine learning...») è stata esplicitamente valutata e scartata in D1, a
+favore di una regressione a percentili — coerente con `analysis/01_irrigazione_decisione.md`,
+che aveva già scartato il ML per lo stesso problema a maggio.
 
 ---
 
