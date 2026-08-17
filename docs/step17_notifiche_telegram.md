@@ -272,10 +272,17 @@ robusto ai cambi di regime.
 | `delta_batteria_24h` | batteria ora − batteria 24 h prima | Il calo conta più del livello, finché si è lontani da 1,1 V |
 | `scarto_da_sorelle` | \|mediana della sonda − mediana delle altre sonde attive\| | Le quattro sonde vedono lo stesso meteo: uno scarto crescente è informativo |
 | `sigma_valore` | deviazione standard del valore nell'ora | Sia il rumore anomalo sia l'immobilità sospetta |
-| `run_identici` | massima sequenza di letture identiche consecutive | Rilevatore di valore bloccato |
+| `ore_bloccate` | numero di ore consecutive, fino a quella corrente, con `sigma_valore = 0` e media invariata | Rilevatore di valore bloccato |
 
 Tutte le feature sono normalizzate (media 0, deviazione 1) sulla finestra di addestramento
 prima di entrare nel modello.
+
+> **Nota di derivazione.** Tutte e sette si ricavano da **aggregati orari** (`count`, `mean`,
+> `stddev`, `max(elapsed)`), cioè ~2.880 righe per una finestra di 30 giorni. Nessuna feature
+> richiede i campioni grezzi, che sarebbero ~173.000 righe da riscaricare ogni quarto d'ora.
+> `ore_bloccate` è la versione oraria di «letture identiche consecutive»: un'ora con
+> deviazione standard nulla **è** un'ora di letture identiche, e contare le ore consecutive
+> in quello stato misura la stessa cosa a una granularità sufficiente per una soglia di 12 ore.
 
 ### 4.3 Guardie deterministiche
 
@@ -284,7 +291,7 @@ prima di entrare nel modello.
 | **G1 — sonda muta** | nessun campione da > 45 min | la condizione stessa è la conferma |
 | **G2 — batteria bassa** | `battery_voltage < 1,15 V` | 3 letture consecutive |
 | **G3 — batteria in calo** | pendenza della regressione lineare su 7 giorni < −0,02 V/settimana | confermata su 3 giorni consecutivi |
-| **G4 — valore bloccato** | stessa lettura identica per > 12 h **mentre** almeno un'altra sonda è variata di ≥ 3 pp | la doppia condizione è la conferma |
+| **G4 — valore bloccato** | `ore_bloccate ≥ 12` **mentre** almeno un'altra sonda è variata di ≥ 3 pp nello stesso intervallo | la doppia condizione è la conferma |
 
 **Note di taratura.** La soglia di G2 è a 1,15 V e non a 1,1 V di proposito: 1,1 V è il
 punto in cui il sistema smette di considerare la sonda affidabile, e un avviso che arriva
