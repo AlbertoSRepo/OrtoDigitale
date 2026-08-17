@@ -162,8 +162,10 @@ def _sezione_features():
         assert out[4]["ore_bloccate"] == 5, [r["ore_bloccate"] for r in out]
         assert out[5]["ore_bloccate"] == 0
 
-    def ore_bloccate_richiede_media_invariata():
-        # sigma nulla ma media che cambia: non e' bloccata, sta salendo a gradini
+    def ore_bloccate_riparte_da_uno_se_la_media_cambia():
+        # sigma nulla ma media diversa dall'ora precedente: la sequenza
+        # congelata precedente si interrompe e ne comincia una nuova, quindi
+        # il contatore riparte da 1 (non prosegue, e non si azzera).
         righe = [riga("WH51_01", h, sigma=0.0, media=50.0 + h) for h in range(4)]
         out = features.costruisci(righe)
         assert out[-1]["ore_bloccate"] == 1, [r["ore_bloccate"] for r in out]
@@ -183,7 +185,7 @@ def _sezione_features():
     prova("senza 24 ore di storia il delta e' 0", delta_batteria_senza_storia_e_zero)
     prova("scarto_da_sorelle usa la mediana delle altre", scarto_da_sorelle)
     prova("ore_bloccate cresce e si azzera", ore_bloccate_cresce_e_si_azzera)
-    prova("ore_bloccate richiede anche la media invariata", ore_bloccate_richiede_media_invariata)
+    prova("ore_bloccate riparte da 1 se la media cambia", ore_bloccate_riparte_da_uno_se_la_media_cambia)
     prova("le colonne della matrice sono sette", colonne_sono_sette)
     prova("nessun None arriva alla matrice", nessun_none_nella_matrice)
 

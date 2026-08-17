@@ -51,8 +51,6 @@ def costruisci(righe):
             # letture identiche: e' la versione oraria di "valore bloccato".
             if sigma is not None and sigma == 0.0 and media is not None and media == media_precedente:
                 bloccate += 1
-            elif sigma is not None and sigma == 0.0 and media_precedente is None:
-                bloccate = 1
             else:
                 bloccate = 1 if (sigma is not None and sigma == 0.0) else 0
             r["ore_bloccate"] = bloccate
