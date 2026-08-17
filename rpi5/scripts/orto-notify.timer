@@ -1,0 +1,11 @@
+[Unit]
+Description=Orto Digitale - timer notifiche salute sonde (ogni 15 min)
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=15min
+AccuracySec=30s
+Unit=orto-notify.service
+
+[Install]
+WantedBy=timers.target

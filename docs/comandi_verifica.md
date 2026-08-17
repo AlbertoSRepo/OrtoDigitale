@@ -341,3 +341,57 @@ ssh as@192.168.1.12 'echo aru63 | sudo -S systemctl stop orto-simulator'
 | `mosquitto_sub` non riceve nulla | `docker logs mosquitto --tail 50` | Cerca "Client connected" del `gw3000-orto-01` |
 | GW3000 ha perso il broker | `ping 192.168.1.12` da GW3000 (se possibile) + controllo IP del RPi5 | DHCP reservation sul router, IP fisso |
 | SSH "REMOTE HOST KEY CHANGED" | — | `ssh-keygen -R 192.168.1.12` poi riconnetti |
+
+---
+
+## 11. Notifiche Telegram (step 17)
+
+Servizio `orto-notify` (oneshot) + `orto-notify.timer` (ogni 15 min), installati in
+`/etc/systemd/system/` e pacchetto in `/opt/orto-digitale/scripts/orto_notify/`.
+**Il timer non è attivo**: manca `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` in
+`/opt/orto-digitale/.env` (vanno creati a mano su @BotFather, vedi `rpi5/.env.example`).
+Finché mancano, `telegram.invia()` ritorna `0` senza sollevare — nessun invio, nessun errore.
+
+### 11.1 Prova a secco (nessun invio, sempre sicura da eseguire)
+
+```bash
+ssh as@192.168.1.12 'set -a; . /opt/orto-digitale/.env; set +a; cd /opt/orto-digitale/scripts && python3 -m orto_notify --once --dry-run'
+```
+
+Atteso: una riga finale `righe=... anomalie=... inviati=0` e, se ci sono anomalie, i testi
+dei messaggi **senza invio**. Se stampa `manca INFLUX_TOKEN_EXPORT_RO nell'ambiente` (o
+`righe=0`), il `.env` non è stato caricato — non aggirare il problema, è un sintomo di
+deploy/config, non di dati assenti.
+
+> ⚠️ **Nota nota dal deploy del 2026-08-17**: l'ora corrente (ancora aperta) genera nel
+> rilevatore Isolation Forest righe quasi-vuote (join fallito fra le 5 sotto-query di
+> `serie_oraria()` sul timestamp dell'ora ancora in corso, che InfluxDB etichetta con l'istante
+> di query anziché il confine dell'ora) — può segnalare "comportamento insolito" su **tutte**
+> le sonde contemporaneamente. Le guardie deterministiche (muta, batteria bassa/in calo,
+> valore bloccato) non ne risentono. **Non attivare il timer finché questo non è stato
+> corretto**, altrimenti ogni ciclo rischia di generare un falso allarme "anomalia" su ogni
+> sonda. Dettagli riproducibili in `.superpowers/sdd/step17_piano_implementazione/task-10-report.md`.
+
+### 11.2 Primo invio vero (quando il token è pronto)
+
+```bash
+ssh as@192.168.1.12 'set -a; . /opt/orto-digitale/.env; set +a; cd /opt/orto-digitale/scripts && python3 -m orto_notify --once'
+```
+
+Atteso: il messaggio arriva sul telefono. Se Telegram risponde `400`, controllare che il
+testo non contenga sintassi Markdown (i test lo escludono, ma la verifica sul campo è la
+prova vera).
+
+### 11.3 Attivare il timer (solo dopo 11.1/11.2 verificati con esito atteso)
+
+```bash
+ssh as@192.168.1.12 'echo aru63 | sudo -S systemctl enable --now orto-notify.timer'
+ssh as@192.168.1.12 'systemctl list-timers | grep orto-notify'
+```
+
+### 11.4 Stato e log
+
+```bash
+ssh as@192.168.1.12 'cat /opt/orto-digitale/notify/state.json'
+ssh as@192.168.1.12 'journalctl -u orto-notify.service --since "1 day ago" | tail -30'
+```
