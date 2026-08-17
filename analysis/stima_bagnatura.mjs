@@ -235,3 +235,57 @@ for (const fattore of [1.5, 2, 3]) {
   }).length;
   console.log(`${fattore.toFixed(1).padStart(7)} | ${soglia.toFixed(2).padStart(11)} | ${String(nIrr).padStart(21)} | ${String(nPioggia).padStart(16)}`);
 }
+
+// ============================================================
+// FASE D — attribuzione. FATTORE_SICUREZZA e' stato scelto leggendo la
+// tabella di sensibilita' stampata sopra (Passo 1 di questo task):
+// (a) nessun gomito netto nella tabella (213→204→181, calo quasi lineare);
+// (b) bias statistico noto: residuoDiPicco prende il MASSIMO su ~12+ campioni
+//     in finestra 3h, ma soglia e' tarata sulla MEDIANA di errore puntuale
+//     (un solo campione) — il massimo supera sistematicamente una soglia sulla
+//     mediana del singolo punto, anche senza segnale vero (bias da statistica
+//     d'ordine), confermato da due review indipendenti;
+// (c) scelto il fattore piu' alto disponibile fra i tre testati come
+//     mitigazione parziale, non come soluzione del bias;
+// (d) il backtest del Task 6 resta la verifica onesta finale.
+const FATTORE_SICUREZZA = 3;
+const soglia = FATTORE_SICUREZZA * pavimento.med;
+
+function classificaIrrigazione(f) {
+  const r = residuoDiPicco(f.inizio, f.fine);
+  if (!r || Math.abs(r.residuo) <= soglia) return { ...f, esito: 'scartato_rumore' };
+  const pioggiaVicina = finestrePioggia.some((p) => p.inizio <= f.fine && p.fineFinestra >= f.inizio);
+  if (pioggiaVicina) return { ...f, esito: 'scartato_ambiguo' };
+  return { ...f, esito: 'irrigazione', tPicco: r.ts, residuo: r.residuo };
+}
+
+function classificaPioggia(f) {
+  const r = residuoDiPicco(f.inizio, f.fineFinestra);
+  if (!r || Math.abs(r.residuo) <= soglia) return { ...f, esito: 'scartato_rumore' };
+  const valvolaVicina = finestreIrrigazione.some((e) => e.inizio <= f.fineFinestra && e.fine >= f.inizio);
+  if (valvolaVicina) return { ...f, esito: 'scartato_ambiguo' };
+  return { ...f, esito: 'pioggia', tPicco: r.ts, residuo: r.residuo };
+}
+
+const irrigazioneClassificata = finestreIrrigazione.map(classificaIrrigazione);
+const pioggiaClassificata = finestrePioggia.map(classificaPioggia);
+
+// Riporta tPicco sulle finestreIrrigazione originali (quelle che
+// erroreProiezione legge nel Task 6): senza questo passaggio il backtest
+// esteso non saprebbe dove iniettare il contributo di w_irr.
+for (const f of irrigazioneClassificata) {
+  if (f.esito === 'irrigazione') {
+    const orig = finestreIrrigazione.find((x) => x.chiusura === f.chiusura);
+    orig.tPicco = f.tPicco;
+  }
+}
+
+console.log(`\n--- FASE D: attribuzione (fattore di sicurezza = ${FATTORE_SICUREZZA}, soglia = ${soglia.toFixed(2)} pp) ---`);
+for (const [nome, arr] of [['irrigazione', irrigazioneClassificata], ['pioggia', pioggiaClassificata]]) {
+  const conteggi = arr.reduce((acc, f) => { acc[f.esito] = (acc[f.esito] || 0) + 1; return acc; }, {});
+  console.log(`${nome}: ${JSON.stringify(conteggi)}`);
+}
+
+const candidatiIrrigazione = irrigazioneClassificata.filter((f) => f.esito === 'irrigazione');
+const candidatiPioggia = pioggiaClassificata.filter((f) => f.esito === 'pioggia');
+console.log(`candidati puliti: ${candidatiIrrigazione.length} irrigazione, ${candidatiPioggia.length} pioggia`);
