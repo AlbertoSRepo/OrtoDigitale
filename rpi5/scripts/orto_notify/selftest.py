@@ -106,12 +106,120 @@ def _sezione_influx():
         # chiusura 12:00 + 120 min = 14:00
         assert fine.hour == 14 and fine.minute == 0, fine
 
+    # ------------------------------------------------------------------
+    # serie_oraria() emette CINQUE query Flux distinte (campioni, media,
+    # sigma, batteria, silenzio) che vanno unite sulla chiave (sensor_id,
+    # ora). Per fabbricare quella forma nei test serve un trasporto finto
+    # che smisti la risposta giusta in base al testo della query ricevuta,
+    # cosi' come le distingue davvero serie_oraria() in influx.py.
+    def _smista_campo(corpo):
+        if "elapsed(unit:" in corpo:
+            return "silenzio"
+        if 'r._field == "battery_voltage"' in corpo:
+            return "batteria"
+        if "fn: count," in corpo:
+            return "campioni"
+        if "fn: mean," in corpo:
+            return "media"
+        if "fn: stddev," in corpo:
+            return "sigma"
+        raise AssertionError("query Flux non riconosciuta dal trasporto finto: " + corpo)
+
+    def _csv_campo(righe, colonna):
+        intestazione = ",result,table,_time,%s,sensor_id\r\n" % colonna
+        corpo = "".join(
+            ",_result,0,%s,%s,%s\r\n" % (istante, valore, sonda)
+            for (sonda, istante, valore) in righe
+        )
+        return intestazione + corpo + "\r\n"
+
+    def _trasporto_serie(per_campo):
+        # per_campo: {"campioni"/"media"/"sigma"/"batteria"/"silenzio": [(sensor_id, iso, valore), ...]}
+        def trasporto(url, headers, body):
+            campo = _smista_campo(body)
+            colonna = "elapsed" if campo == "silenzio" else "_value"
+            return _csv_campo(per_campo.get(campo, []), colonna)
+        return trasporto
+
+    def stddev_nan_diventa_none():
+        # stddev() di un bucket con un solo campione e' indefinita: InfluxDB
+        # la serializza come la stringa "NaN". Deve diventare None, non un
+        # float NaN: "is None" e' un controllo robusto perche' NaN non e'
+        # None, mentre un controllo come "non e' un float" passerebbe anche
+        # su un NaN vero (NaN e' un float) senza provare nulla.
+        T = "2026-08-17T10:00:00Z"
+        righe = _trasporto_serie({
+            "campioni": [("WH51_01", T, 1)],
+            "media": [("WH51_01", T, 45.0)],
+            "sigma": [("WH51_01", T, "NaN")],
+            "batteria": [("WH51_01", T, 1.5)],
+            "silenzio": [("WH51_01", T, 0)],
+        })
+        fuori = influx.serie_oraria("TOKEN", 1, trasporto=righe)
+        assert len(fuori) == 1, fuori
+        sigma = fuori[0]["sigma"]
+        assert sigma is None, sigma
+        assert not (sigma != sigma), "un NaN vero fallirebbe anche questo controllo"
+
+    def bucket_parziale_scartato_gli_allineati_restano():
+        # L'ora ancora in corso non e' allineata (minuti/secondi/microsecondi
+        # non a zero): deve sparire dall'output, mentre le ore intere prima e
+        # dopo devono restare.
+        ALLINEATA_1 = "2026-08-17T10:00:00Z"
+        ALLINEATA_2 = "2026-08-17T11:00:00Z"
+        PARZIALE = "2026-08-17T11:23:35Z"
+        campi = {}
+        for nome, valore in (("campioni", 60), ("media", 50.0), ("sigma", 1.0),
+                              ("batteria", 1.6), ("silenzio", 0)):
+            campi[nome] = [
+                ("WH51_01", ALLINEATA_1, valore),
+                ("WH51_01", ALLINEATA_2, valore),
+                ("WH51_01", PARZIALE, valore),
+            ]
+        fuori = influx.serie_oraria("TOKEN", 1, trasporto=_trasporto_serie(campi))
+        ore = [r["ora"] for r in fuori]
+        assert len(fuori) == 2, fuori
+        assert all(o.minute == 0 and o.second == 0 and o.microsecond == 0 for o in ore), ore
+        assert not any(o.minute == 23 for o in ore), ore
+
+    def bucket_a_cinque_frammenti_collassa_al_solo_orario_completo():
+        # Forma reale catturata in produzione: le cinque sotto-query per
+        # l'ora ancora in corso arrivano con istanti che differiscono di
+        # microsecondi, quindi non si uniscono mai sulla chiave (sensor_id,
+        # ora) e restano cinque righe rotte (quattro campi su cinque vuoti
+        # in ciascuna). Devono sparire tutte; deve restare solo la riga
+        # dell'ora piena e allineata.
+        ALLINEATA = "2026-08-17T20:00:00Z"
+        F_CAMPIONI = "2026-08-17T20:23:35.111111Z"
+        F_MEDIA = "2026-08-17T20:23:35.222222Z"
+        F_SIGMA = "2026-08-17T20:23:35.333333Z"
+        F_BATTERIA = "2026-08-17T20:23:35.444444Z"
+        F_SILENZIO = "2026-08-17T20:23:35.555555Z"
+        campi = {
+            "campioni": [("WH51_01", ALLINEATA, 60), ("WH51_01", F_CAMPIONI, 22)],
+            "media": [("WH51_01", ALLINEATA, 47.98), ("WH51_01", F_MEDIA, 48.0)],
+            "sigma": [("WH51_01", ALLINEATA, 0.129), ("WH51_01", F_SIGMA, 0.0)],
+            "batteria": [("WH51_01", ALLINEATA, 1.5), ("WH51_01", F_BATTERIA, 1.5)],
+            "silenzio": [("WH51_01", ALLINEATA, 0), ("WH51_01", F_SILENZIO, 0)],
+        }
+        fuori = influx.serie_oraria("TOKEN", 1, trasporto=_trasporto_serie(campi))
+        assert len(fuori) == 1, fuori
+        riga = fuori[0]
+        assert riga["ora"].isoformat() == "2026-08-17T20:00:00+00:00", riga["ora"]
+        assert riga["campioni"] == 60, riga
+        assert riga["media"] == 47.98, riga
+        assert riga["sigma"] == 0.129, riga
+        assert riga["batteria"] == 1.5, riga
+
     prova("il CSV annotato viene letto in dizionari", parsing)
     prova("le righe vuote non diventano record", righe_vuote_ignorate)
     prova("il token viaggia nell'header, non nell'URL", token_nel_header)
     prova("la query raggruppa solo per sensor_id", query_raggruppa_solo_per_sensor_id)
     prova("ultimo_campione da' un istante per sonda", ultimo_campione_per_sonda)
     prova("le finestre di irrigazione sono gia' allargate", finestre_allargate)
+    prova("stddev NaN diventa None, non un float NaN", stddev_nan_diventa_none)
+    prova("un bucket parziale e' scartato, gli allineati restano", bucket_parziale_scartato_gli_allineati_restano)
+    prova("i cinque frammenti dell'ora in corso collassano al solo orario completo", bucket_a_cinque_frammenti_collassa_al_solo_orario_completo)
 
 
 def _sezione_features():

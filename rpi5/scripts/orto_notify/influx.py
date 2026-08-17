@@ -94,9 +94,20 @@ def interroga(flux, token, trasporto=None):
 
 def _num(valore):
     try:
-        return float(valore)
+        numero = float(valore)
     except (TypeError, ValueError):
         return None
+    # stddev() di una finestra con un solo campione e' indefinita: InfluxDB
+    # la scrive come "NaN", che float() converte senza sollevare eccezioni.
+    # Trattarla come mancante (None) e' corretto quanto lo e' semanticamente:
+    # una varianza indefinita non e' zero, e' un buco nei dati, e a valle
+    # (features.costruisci) i buchi diventano 0.0 come ogni altro None.
+    # Senza questo controllo un NaN nudo arriva a IsolationForest, che lo
+    # rifiuta e fa fallire l'intero ciclo di rilevazione (anche le guardie
+    # deterministiche, per come ciclo() condivide il blocco try/except) --
+    # proprio nelle ore con pochi campioni, cioe' proprio quando una sonda
+    # come WH51_01 sta perdendo pacchetti.
+    return None if numero != numero else numero
 
 
 def serie_oraria(token, giorni, trasporto=None):
@@ -131,6 +142,18 @@ def serie_oraria(token, giorni, trasporto=None):
 
     fuori = []
     for riga in unite.values():
+        ora = riga["ora"]
+        # L'ora ancora in corso non e' allineata (minuti/secondi/microsecondi
+        # non a zero): aggregateWindow la marca con l'istante di esecuzione
+        # della query, non con l'inizio dell'ora. E' un bucket incompleto per
+        # costruzione (il suo "campioni" e' un conteggio parziale, non un
+        # tasso di consegna basso) e le cinque sotto-query la marcano con
+        # istanti che differiscono di microsecondi, quindi le loro righe non
+        # si uniscono mai sulla chiave (sensor_id, ora): resterebbero frammenti
+        # rotti, quasi tutti None. Si scarta, qui, una volta per tutti i
+        # chiamanti.
+        if ora.minute or ora.second or ora.microsecond:
+            continue
         riga["campioni"] = int(riga.get("campioni") or 0)
         fuori.append(riga)
     fuori.sort(key=lambda r: (r["sensor_id"], r["ora"]))
