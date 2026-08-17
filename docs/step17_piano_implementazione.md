@@ -2391,13 +2391,203 @@ pena conoscerli perché sono facili da reintrodurre:
 
 ## Verifica finale (checklist)
 
-- [ ] `python3 -m orto_notify.selftest` → 53 passati, 0 falliti
-- [ ] I 126 test Node-RED sono ancora verdi
-- [ ] `git diff main --name-only` **non** contiene `flows.json`, `irrigation_config.json`, `docker-compose.yml`, né file del frontend
-- [ ] `--backtest` rispetta il criterio: < 1 alert/settimana per sonda sana, ≥ 1 su WH51_01
-- [ ] `--dry-run` sul RPi stampa senza inviare
-- [ ] Un messaggio vero è arrivato sul telefono
-- [ ] `systemctl list-timers` mostra `orto-notify.timer` armato
-- [ ] `verify_rpi5.sh` verde e i sei container `Up` senza riavvii
-- [ ] Nessun token compare nel repo (`git log -p | grep -i "bot[0-9]\{8,\}"` vuoto)
-- [ ] Le quattro correzioni a `CLAUDE.md` sono applicate
+- [x] `python3 -m orto_notify.selftest` → **56 passati, 0 falliti** (53 del piano + 3 aggiunti dai fix di produzione)
+- [x] I test Node-RED sono ancora verdi — **148 su 8 file**, non 126: nel frattempo un'altra sessione ha aggiunto `id_fisici.test.mjs` (16) e ampliato `registro_sensori.test.mjs` (23 → 29). Il criterio è «tutti verdi», non un numero fisso, perché un conteggio assoluto è fragile quando due sessioni lavorano sullo stesso repo
+- [x] `git diff main --name-only` **non** contiene `flows.json`, `irrigation_config.json`, `docker-compose.yml`, né file del frontend
+- [x] `--backtest` rispetta il criterio: < 1 alert/settimana per sonda sana, ≥ 1 su WH51_01 — vedi §Taratura della spec
+- [x] `--dry-run` sul RPi stampa senza inviare
+- [ ] **Un messaggio vero è arrivato sul telefono** — bloccato: manca il bot, vedi §Come creare il bot
+- [ ] **`systemctl list-timers` mostra `orto-notify.timer` armato** — bloccato dallo stesso motivo
+- [x] `verify_rpi5.sh` verde e i sei container `Up` senza riavvii
+- [x] Nessun token compare nel repo
+- [ ] Le quattro correzioni a `CLAUDE.md` sono applicate — task 11, ancora da fare
+
+---
+
+## Stato al 2026-08-17
+
+**Dieci task su undici completi.** Il servizio è installato e verificato sul Raspberry, ma
+non invia ancora: manca il bot Telegram, che va creato a mano (sezione successiva).
+
+| Task | Stato | Commit |
+|---|---|---|
+| 0 Branch | ✅ | — |
+| 1 Scheletro e banco di prova | ✅ | `782183d` |
+| 2 Client InfluxDB | ✅ | `ed5005c` |
+| 3 Matrice delle feature | ✅ dopo 1 fix | `6899569`, `89f9545` |
+| 4 Guardie deterministiche | ✅ pulito al primo giro | `559e168` |
+| 5 Isolation Forest | ✅ pulito al primo giro | `a5e9e3f` |
+| 6 Conferma e anti-spam | ✅ pulito al primo giro | `763ad76` |
+| 7 Messaggi e Telegram | ✅ pulito al primo giro | `73f7dd1` |
+| 8 Orchestrazione e CLI | ✅ dopo 1 fix | `e02fe50`, `192d34c` |
+| 9 Taratura | ✅ nessuna soglia cambiata | `f071dc3` |
+| 10 Deploy | ✅ parziale — timer non attivato | `af2b3b3` |
+| — Fix da dati reali | ✅ | `e1ff64b` |
+| 11 Documentazione | ⏳ da fare | — |
+
+### I due bug che solo i dati reali hanno rivelato
+
+Il dry-run contro il sistema vero ha fatto emergere due difetti che le 53 prove sintetiche
+non potevano cogliere. Entrambi erano bloccanti; entrambi ora hanno un test che li copre.
+
+**NaN da `stddev` su bucket con un solo campione.** InfluxDB serializza una deviazione
+indefinita come la stringa `"NaN"`, e `float("NaN")` la accetta senza sollevare. Quel NaN
+arrivava all'Isolation Forest, che lo rifiuta, e faceva fallire **l'intero ciclo** —
+comprese le guardie deterministiche, perché `ciclo()` le racchiude nello stesso
+`try/except`. Misurato sui dati veri: 12 righe su 2886 in 30 giorni, **tutte di
+`WH51_01`**, cioè proprio la sonda che perde pacchetti.
+
+**Il bucket dell'ora corrente si frammentava in cinque righe.** Le cinque sotto-query di
+`serie_oraria` girano in istanti diversi; per l'ora ancora aperta `aggregateWindow`
+etichetta il bucket parziale con il momento dell'esecuzione, quindi i cinque timestamp
+differivano di microsecondi e la chiave `(sensor_id, ora)` non combaciava: le righe non si
+fondevano. Ogni frammento aveva quattro campi su cinque vuoti, che diventavano `0.0`, e il
+modello leggeva quel profilo tutto-zeri come un'anomalia clamorosa su **tutte e quattro le
+sonde, a ogni ciclo**. Misurato: 20 righe parziali su 212, 20 su 20 incomplete. In
+produzione sarebbero state quattro notifiche false ogni quarto d'ora — abbastanza da farsi
+silenziare il bot nel giro di un pomeriggio, e da rendere inutile tutto il resto.
+
+Il secondo era la forma acuta di un difetto annotato come «minore» al task 3 (bucket non
+allineati all'ora). Quella classificazione era sbagliata.
+
+**Dopo il fix, contro il sistema reale:**
+
+```
+righe=2880 anomalie=1 inviati=0
+```
+
+Una sola anomalia, quella vera: batteria di `WH51_01` in calo. Le quattro false sono
+sparite.
+
+---
+
+## Come creare il bot Telegram
+
+Questi passaggi richiedono il tuo telefono e non possono essere automatizzati: BotFather
+parla solo con una persona dentro Telegram. Servono cinque minuti.
+
+### 1. Creare il bot
+
+Apri Telegram e cerca **@BotFather** (quello con la spunta di verifica). Scrivigli:
+
+```
+/newbot
+```
+
+Ti chiederà due cose in sequenza:
+- **il nome visualizzato** — quello che vedrai in cima alla chat. Per esempio `Orto Digitale`
+- **lo username** — deve essere unico su tutto Telegram e finire per `bot`. Per esempio
+  `orto_digitale_casa_bot`. Se è già preso te lo dice e puoi riprovare
+
+Alla fine BotFather risponde con un messaggio che contiene il token, in questa forma:
+
+```
+123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw
+```
+
+**Quel token è una credenziale**: chi ce l'ha può scrivere a nome del tuo bot. Non
+incollarlo in chat, non metterlo nel repo, non mandarlo per email. Se ti scappa, da
+BotFather puoi revocarlo con `/revoke` e generarne uno nuovo.
+
+### 2. Ottenere il tuo `chat_id`
+
+Il bot può scrivere solo a chi gli ha parlato per primo. Quindi:
+
+1. Cerca il tuo bot con lo username che hai scelto e apri la chat
+2. Premi **Avvia** (o scrivi `/start`) e manda un messaggio qualsiasi, anche solo `ciao`
+
+Poi, dal PC, chiedi a Telegram cosa ha ricevuto — sostituisci `<TOKEN>` con il tuo:
+
+```bash
+curl -s "https://api.telegram.org/bot<TOKEN>/getUpdates" | tr ',' '\n' | grep -A2 '"chat"'
+```
+
+Nella risposta cerca `"chat":{"id":...}`: quel numero è il tuo `chat_id`. È un intero, di
+solito 9-10 cifre, e può essere negativo se un giorno userai un gruppo invece della chat
+personale.
+
+Se `getUpdates` restituisce una lista vuota, il messaggio del punto 2 non è arrivato:
+controlla di aver scritto **al tuo bot** e non a BotFather.
+
+### 3. Metterli sul Raspberry
+
+I segreti vivono solo in `/opt/orto-digitale/.env`, mai nel repo. Aggiungili in coda:
+
+```bash
+ssh as@192.168.1.12
+sudo tee -a /opt/orto-digitale/.env >/dev/null <<'EOF'
+
+# ---- Telegram (step 17) ----
+TELEGRAM_BOT_TOKEN=123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw
+TELEGRAM_CHAT_ID=987654321
+EOF
+```
+
+Sostituisci i due valori con i tuoi. Verifica che siano stati letti correttamente, senza
+stamparli:
+
+```bash
+ssh as@192.168.1.12 'set -a; . /opt/orto-digitale/.env; set +a; \
+  echo "token: ${#TELEGRAM_BOT_TOKEN} caratteri"; echo "chat_id: ${#TELEGRAM_CHAT_ID} cifre"'
+```
+
+Attesi: un token di **44-46 caratteri** (l'id numerico del bot, i due punti, e 34 caratteri
+di segreto) e un chat_id di **9-10 cifre**. Se leggi `0` per uno dei due, la riga nel `.env`
+ha un errore di battitura.
+
+### 4. Prova a vuoto, poi invio vero
+
+Prima senza inviare nulla — deve stampare i messaggi e `inviati=0`:
+
+```bash
+ssh as@192.168.1.12 'set -a; . /opt/orto-digitale/.env; set +a; \
+  cd /opt/orto-digitale/scripts && python3 -m orto_notify --once --dry-run'
+```
+
+Poi per davvero. Questo **manda il messaggio sul telefono**:
+
+```bash
+ssh as@192.168.1.12 'set -a; . /opt/orto-digitale/.env; set +a; \
+  cd /opt/orto-digitale/scripts && python3 -m orto_notify --once'
+```
+
+Deve stampare `inviati=1` (o più) e il messaggio deve comparire in chat. Allo stato attuale
+del sistema il primo messaggio sarà l'avviso di batteria in calo su `WH51_01`.
+
+Se Telegram risponde `400 Bad Request`, il testo contiene qualcosa che l'API rifiuta:
+segnalalo invece di aggirarlo, perché il codice è scritto apposta per non farlo accadere
+(nessun `parse_mode`, testo semplice).
+
+Se stampa `inviati=0` senza errori, il token o il chat_id non sono stati letti: torna al
+punto 3.
+
+### 5. Attivare il timer
+
+Solo dopo che un messaggio è arrivato davvero:
+
+```bash
+ssh as@192.168.1.12 'echo aru63 | sudo -S systemctl enable --now orto-notify.timer'
+ssh as@192.168.1.12 'systemctl list-timers | grep orto-notify'
+```
+
+Da quel momento il controllo gira ogni 15 minuti. Per vedere cosa ha fatto:
+
+```bash
+ssh as@192.168.1.12 'journalctl -u orto-notify.service --since "1 day ago" | tail -30'
+ssh as@192.168.1.12 'cat /opt/orto-digitale/notify/state.json'
+```
+
+Lo `state.json` è la memoria dell'anti-spam: contiene, per ogni sonda e tipo di problema,
+quando è stato mandato l'ultimo avviso. Cancellarlo non rompe nulla — al più fa ripetere
+un avviso già visto.
+
+### Come fermarlo
+
+Se il bot diventa molesto o vuoi sospenderlo durante dei lavori sull'orto:
+
+```bash
+ssh as@192.168.1.12 'echo aru63 | sudo -S systemctl disable --now orto-notify.timer'
+```
+
+Nulla di ciò che riguarda l'irrigazione ne risente: il servizio di notifica è un processo
+separato che legge soltanto. Fermarlo non tocca né Node-RED né la valvola.
