@@ -167,9 +167,10 @@ function ultimoCampionePulito(ts) {
   return null;
 }
 
-// Residuo di picco in (inizio, fine]: il campione dove osservato meno
-// contro-fattuale e' massimo. Ritorna null se manca un punto di partenza
-// pulito o se la finestra non contiene campioni.
+// Residuo di picco in (inizio, fine]: il campione dove |osservato meno
+// contro-fattuale| e' massimo in valore assoluto (non solo il massimo con
+// segno positivo — vedi il confronto Math.abs(...) sotto). Ritorna null se
+// manca un punto di partenza pulito o se la finestra non contiene campioni.
 function residuoDiPicco(inizio, fine) {
   const base = ultimoCampionePulito(inizio);
   if (!base) return null;
@@ -239,7 +240,8 @@ for (const fattore of [1.5, 2, 3]) {
 // ============================================================
 // FASE D — attribuzione. FATTORE_SICUREZZA e' stato scelto leggendo la
 // tabella di sensibilita' stampata sopra (Passo 1 di questo task):
-// (a) nessun gomito netto nella tabella (213→204→181, calo quasi lineare);
+// (a) nessun gomito netto nella tabella (231→224→206, calo non perfettamente
+//     lineare — accelera leggermente fra i fattori 2.0 e 3.0);
 // (b) bias statistico noto: residuoDiPicco prende il MASSIMO su ~12+ campioni
 //     in finestra 3h, ma soglia e' tarata sulla MEDIANA di errore puntuale
 //     (un solo campione) — il massimo supera sistematicamente una soglia sulla
