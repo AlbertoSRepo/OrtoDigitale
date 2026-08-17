@@ -187,7 +187,7 @@ function residuoDiPicco(inizio, fine) {
     tPrec = s.ts;
     if (!Number.isFinite(controFattuale)) continue;
     const residuo = s.v - controFattuale;
-    if (!migliore || residuo > migliore.residuo) {
+    if (!migliore || Math.abs(residuo) > Math.abs(migliore.residuo)) {
       migliore = { ts: s.ts, residuo, controFattuale, osservato: s.v };
     }
   }
@@ -336,13 +336,23 @@ if (!wIrrStat && !wRainStat) {
 }
 
 // ============================================================
-// FASE F — backtest esteso. Confronto onesto a tre colonne sugli stessi
-// orizzonti gia' usati per k (6/12/24h):
-//   1. puliti, solo asciugatura      — gia' calcolato per k, riferimento
+// FASE F — backtest esteso. Confronto onesto a quattro colonne sugli
+// stessi orizzonti gia' usati per k (6/12/24h):
+//   1. puliti, solo asciugatura, senza alcun termine di pioggia (variante
+//      NUOVA, NON il riferimento pubblicato dallo step 15 — quel
+//      riferimento usa w_rain=1.2 sui campioni puliti, riprodotto dalla
+//      riga "w_rain=1.2" della tabella FASE F bis piu' sotto, che va
+//      confrontata con analysis/03_stima_asciugatura.md)
 //   2. contaminati, modello esteso   — w_irr/w_rain iniettati dove serve
 //   3. contaminati, solo asciugatura — stessi intervalli della colonna 2,
 //      ma SENZA alcun termine di bagnatura: mostra quanto sarebbe
 //      sbagliato ignorare l'evento, a parita' di campioni
+//   4. contaminati, solo w_irr       — stessi intervalli della colonna 2,
+//      ma con w_rain forzato a 0: isola il contributo di w_irr da solo.
+//      w_rain NON si testa onestamente su questo bucket (le finestre
+//      valvola dominano il segnale): il suo test onesto e' sul bucket
+//      "puliti", mai attraversato da una finestra valvola — vedi FASE F
+//      bis subito sotto.
 // Nessuna soglia di accettazione qui: la spec (D3, §5) chiede di leggere
 // il numero prima di fissarla, non di calarla dall'alto.
 // ============================================================
@@ -351,12 +361,39 @@ const wRainFinale = wRainStat ? wRainStat.mediana : 0;
 
 console.log('\n--- FASE F: backtest esteso (asciugatura + bagnatura) ---');
 console.log(`w_irr usato: ${wIrrStat ? wIrrFinale.toFixed(4) : '0 (dati insufficienti)'}  w_rain usato: ${wRainStat ? wRainFinale.toFixed(4) : '0 (dati insufficienti)'}`);
-console.log('orizzonte | 1) puliti/solo-asciugatura med,p90 (n) | 2) contaminati/esteso med,p90 (n) | 3) contaminati/solo-asciugatura med,p90 (n)');
+console.log('orizzonte | 1) puliti/solo-asciugatura med,p90 (n) | 2) contaminati/esteso med,p90 (n) | 3) contaminati/senza-bagnatura med,p90 (n) | 4) contaminati/solo-w_irr med,p90 (n)');
 for (const ore of [6, 12, 24]) {
   const base = erroreProiezione(ore, {});
   const esteso = erroreProiezione(ore, { wIrr: wIrrFinale, wRain: wRainFinale });
+  const soloWIrr = erroreProiezione(ore, { wIrr: wIrrFinale, wRain: 0 });
   const c1 = `${base.puliti.med.toFixed(2)},${base.puliti.p90.toFixed(2)} (${base.puliti.n})`;
   const c2 = `${esteso.contaminati.med.toFixed(2)},${esteso.contaminati.p90.toFixed(2)} (${esteso.contaminati.n})`;
   const c3 = `${base.contaminati.med.toFixed(2)},${base.contaminati.p90.toFixed(2)} (${base.contaminati.n})`;
-  console.log(`${String(ore).padStart(8)}h | ${c1.padStart(38)} | ${c2.padStart(34)} | ${c3.padStart(38)}`);
+  const c4 = `${soloWIrr.contaminati.med.toFixed(2)},${soloWIrr.contaminati.p90.toFixed(2)} (${soloWIrr.contaminati.n})`;
+  console.log(`${String(ore).padStart(8)}h | ${c1.padStart(38)} | ${c2.padStart(34)} | ${c3.padStart(38)} | ${c4.padStart(34)}`);
+}
+
+// ============================================================
+// FASE F (bis) — test onesto di w_rain. Il bucket "contaminati" (colonna
+// 2/3/4 sopra) e' dominato dalle finestre valvola: w_rain non viene mai
+// esercitato li' in proporzione significativa. Il bucket "puliti" e'
+// l'UNICO che w_rain governa senza mai attraversare una finestra valvola
+// (per costruzione: se una finestra di proiezione attraversa una valvola,
+// finisce in "contaminati", vedi erroreProiezione sopra) — e' quindi il
+// solo posto dove il valore fittato si puo' confrontare onestamente.
+// Confronto a tre valori di w_rain sugli stessi orizzonti: 0 (nessun
+// termine di pioggia), 1.2 (la costante gia' in produzione,
+// rpi5/nodered/data/irrigation_config.json -> forecast.rain_gain_pct_per_mm)
+// e il valore fittato in FASE E. wIrr resta a 0 (default): non ha alcun
+// effetto sul bucket "puliti" per lo stesso motivo, quindi e' irrilevante
+// qui.
+// ============================================================
+console.log('\n--- FASE F (bis): w_rain sul bucket "puliti" (solo pioggia, mai valvola) ---');
+console.log(`orizzonte | w_rain=0 (nessuna pioggia) | w_rain=1.2 (produzione attuale) | w_rain=${wRainFinale.toFixed(4)} (fittato)`);
+for (const ore of [6, 12, 24]) {
+  const w0 = erroreProiezione(ore, { wRain: 0 }).puliti;
+  const w12 = erroreProiezione(ore, { wRain: 1.2 }).puliti;
+  const wFit = erroreProiezione(ore, { wRain: wRainFinale }).puliti;
+  const f = (r) => `${r.med.toFixed(2)}/${r.p90.toFixed(2)}`;
+  console.log(`${String(ore).padStart(8)}h (n=${w0.n}) | w=0 -> ${f(w0)} | w=1.2 -> ${f(w12)} | w=${wRainFinale.toFixed(4)} -> ${f(wFit)}`);
 }

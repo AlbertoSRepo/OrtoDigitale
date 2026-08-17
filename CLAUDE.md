@@ -171,7 +171,7 @@ Il GW3000 pubblica **tutti i sensori** in un unico topic `ecowitt/gw3000` come s
 | 13 | Editor layout orto + history spostamenti | ✅ |
 | 14 | Registro sensori con scoperta dal gateway | ✅ |
 | 15 | Previsione prossima irrigazione (modello ET0 + fascia incertezza) | ✅ |
-| 16 | Modello di bagnatura (fase 1 — analisi offline: w_irr/w_rain) | ✅ (fase 1; fase 2 da rivalutare quando ci sarà più storico mode=auto — vedi analysis/04_modello_bagnatura.md) |
+| 16 | Modello di bagnatura (fase 1 — analisi offline: w_irr/w_rain) | ✅ analisi (fase 1); ⏳ produzione (fase 2 da rivalutare quando ci sarà più storico mode=auto — vedi analysis/04_modello_bagnatura.md) |
 
 ---
 

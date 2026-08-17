@@ -42,8 +42,13 @@ step (branch, TDD, deploy in `dry_run`, healthcheck). Non è impegnata da questo
 
 Lo storico di `irrigation_events` non distingue *perché* la valvola è stata aperta.
 Fino al 2026-08-15 ogni apertura ha `trigger=manual` — e lo sblocco manuale è sempre
-stato lo stesso, sia per irrigare l'orto sia per prelevare acqua per altri usi. Un
-record `trigger=manual` **non implica** che l'acqua sia arrivata al terreno.
+stato lo stesso, sia per irrigare l'orto sia per prelevare acqua per altri usi.
+
+**Correzione (vedi `analysis/04_modello_bagnatura.md` §1)**: questa premessa è
+risultata imprecisa — `trigger=auto` compare già da maggio, perché il decision loop
+lo scrive anche in `mode=dry_run`.
+
+Un record `trigger=manual` **non implica** che l'acqua sia arrivata al terreno.
 
 **Dal 2026-08-16 (`mode=auto`) il problema non esiste più per i dati nuovi**: un
 evento `trigger=auto` è per costruzione vera irrigazione da orto, perché il decision
@@ -306,6 +311,6 @@ produzione.
 
 **Commit di riferimento:** `docs(scripts): report del modello di bagnatura (step 16 fase 1)` (86c369a)
 
-**Note:** Attribuzione: sui 296 eventi valvola, 115 scartati come rumore (probabile acqua per altro uso), 134 candidati irrigazione, 47 scartati come ambigui (pioggia vicina). Sui 139 episodi di pioggia raggruppati, 70 scartati come rumore, 31 candidati pioggia, 38 scartati come ambigui (valvola vicina). Coefficienti ottenuti: w_irr = 0.0419 %/L (n=134, p10 0.0118, p90 0.3626), w_rain = 3.1606 %/mm (n=31, p10 0.9804, p90 26.9744). Backtest esteso a 12h: modello esteso 4.64 pp mediana (non batte baseline 3.75 pp). Raccomandazione: "Non procedere ora — servono più dati" (cause: campione pioggia al limite della guardia minima a n=31, bias statistico identificato nel rilevamento delle sorprese, beneficio positivo rimandato a storico `mode=auto` più consistente).
+**Note:** Attribuzione: sui 296 eventi valvola, 90 scartati come rumore (probabile acqua per altro uso), 150 candidati irrigazione, 56 scartati come ambigui (pioggia vicina). Sui 139 episodi di pioggia raggruppati, 56 scartati come rumore, 38 candidati pioggia, 45 scartati come ambigui (valvola vicina). Coefficienti ottenuti: w_irr = 0.0380 %/L (n=150, p10 -0.0108, p90 0.3408), w_rain = 2.0141 %/mm (n=38, p10 -3.6185, p90 26.9744). Backtest esteso a 12h: modello esteso 4.28 pp mediana (non batte baseline 3.75 pp). Scomposizione (review finale post-completamento): w_irr da solo è vicino al pareggio e batte la baseline sulla mediana a 24h (6.69 contro 7.48 pp); w_rain, testato onestamente sul bucket che governa (mai attraversato da una finestra valvola), è invece peggiore della costante già in produzione (1.2) a ogni orizzonte — è la causa principale del mancato miglioramento del modello combinato, non w_irr. Raccomandazione aggiornata: non procedere ora col modello combinato, ma w_irr resta un candidato ragionevole per un secondo giro con più dati puliti (stesso metodo), mentre w_rain richiede un lavoro dedicato (più campioni, soglia ricalibrata) prima di poter competere di nuovo con la costante in produzione. Dettaglio completo in `analysis/04_modello_bagnatura.md`.
 
-**Deviazioni dalla spec:** Nessuna significativa. Fattore di sicurezza = 3.0 scelto con dati reali (tabella sensibilità del report), non da analisi preliminare — già documentato nel codice della Task 4. Scoperta del Report (§1): tag `trigger` riporta `auto` già dal 2026-05-03 anche in `mode=dry_run` (non solo in modalità auto), ma non invalida il metodo basato sul segnale fisico di umidità osservata — scoperta documentata nel report, fuori scope correggerla qui.
+**Deviazioni dalla spec:** Una deviazione dichiarata: la Task 4 del piano prevede di default `FATTORE_SICUREZZA=2` quando la tabella di sensibilità non mostra un gomito netto (non c'era: calo quasi lineare fra i tre candidati testati). Si è scelto deliberatamente `3.0` invece del default `2` — il più prudente fra i tre candidati testati — per mitigare parzialmente il bias da statistica d'ordine noto e già documentato altrove nel piano, non per un'omissione: una scelta esplicita, motivata dalla direzione nota del bias, documentata nel codice (Fase D). Nessun'altra deviazione significativa. Scoperta del Report (§1): tag `trigger` riporta `auto` già dal 2026-05-03 anche in `mode=dry_run` (non solo in modalità auto), ma non invalida il metodo basato sul segnale fisico di umidità osservata — scoperta documentata nel report, fuori scope correggerla qui.
