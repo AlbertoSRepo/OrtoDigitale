@@ -334,3 +334,29 @@ if (!wIrrStat && !wRainStat) {
   console.error('di mode=auto (eventi trigger=auto sono puliti per costruzione) prima di riprovare.');
   process.exit(1);
 }
+
+// ============================================================
+// FASE F — backtest esteso. Confronto onesto a tre colonne sugli stessi
+// orizzonti gia' usati per k (6/12/24h):
+//   1. puliti, solo asciugatura      — gia' calcolato per k, riferimento
+//   2. contaminati, modello esteso   — w_irr/w_rain iniettati dove serve
+//   3. contaminati, solo asciugatura — stessi intervalli della colonna 2,
+//      ma SENZA alcun termine di bagnatura: mostra quanto sarebbe
+//      sbagliato ignorare l'evento, a parita' di campioni
+// Nessuna soglia di accettazione qui: la spec (D3, §5) chiede di leggere
+// il numero prima di fissarla, non di calarla dall'alto.
+// ============================================================
+const wIrrFinale = wIrrStat ? wIrrStat.mediana : 0;
+const wRainFinale = wRainStat ? wRainStat.mediana : 0;
+
+console.log('\n--- FASE F: backtest esteso (asciugatura + bagnatura) ---');
+console.log(`w_irr usato: ${wIrrStat ? wIrrFinale.toFixed(4) : '0 (dati insufficienti)'}  w_rain usato: ${wRainStat ? wRainFinale.toFixed(4) : '0 (dati insufficienti)'}`);
+console.log('orizzonte | 1) puliti/solo-asciugatura med,p90 (n) | 2) contaminati/esteso med,p90 (n) | 3) contaminati/solo-asciugatura med,p90 (n)');
+for (const ore of [6, 12, 24]) {
+  const base = erroreProiezione(ore, {});
+  const esteso = erroreProiezione(ore, { wIrr: wIrrFinale, wRain: wRainFinale });
+  const c1 = `${base.puliti.med.toFixed(2)},${base.puliti.p90.toFixed(2)} (${base.puliti.n})`;
+  const c2 = `${esteso.contaminati.med.toFixed(2)},${esteso.contaminati.p90.toFixed(2)} (${esteso.contaminati.n})`;
+  const c3 = `${base.contaminati.med.toFixed(2)},${base.contaminati.p90.toFixed(2)} (${base.contaminati.n})`;
+  console.log(`${String(ore).padStart(8)}h | ${c1.padStart(38)} | ${c2.padStart(34)} | ${c3.padStart(38)}`);
+}
