@@ -45,6 +45,12 @@ export function OrtoEditor({ layout, sensors, thresholds, activeSensor, onSelect
     () => (registro.data?.sensori ?? []).map((s) => s.sensor_id).filter((id) => !piazzate.has(id)).sort(),
     [registro.data, piazzate],
   );
+  // L'id fisico sta sul canale, non sul sensor_id: il registro è l'unico che
+  // conosce l'aggancio fra i due, e la mappa lo mostra in hover (step 18).
+  const idFisici = useMemo(
+    () => Object.fromEntries((registro.data?.sensori ?? []).map((s) => [s.sensor_id, s.hw_id])),
+    [registro.data],
+  );
   // Se una sonda finisce in una fila diversa dalla sua aiuola di targa, le
   // nuove letture verranno registrate con la fila nuova (step 13, §9).
   const riassegnate = useMemo(
@@ -163,6 +169,7 @@ export function OrtoEditor({ layout, sensors, thresholds, activeSensor, onSelect
         thresholds={thresholds}
         activeSensor={activeSensor}
         onSelectSensor={onSelectSensor}
+        hwIds={idFisici}
         editing={editing}
         onChange={setDraft}
         libereSonde={libereSonde}

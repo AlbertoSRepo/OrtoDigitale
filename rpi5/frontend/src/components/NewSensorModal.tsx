@@ -75,6 +75,7 @@ export function NewSensorModal({ fila, onClose, onRegistrato }: Props) {
             <thead>
               <tr>
                 <th>canale</th>
+                <th>id sonda</th>
                 <th>umidità</th>
                 <th>batteria</th>
                 <th>visto</th>
@@ -85,6 +86,9 @@ export function NewSensorModal({ fila, onClose, onRegistrato }: Props) {
               {rilevati.map((c) => (
                 <tr key={c.channel}>
                   <td className="mono">{c.channel}</td>
+                  {/* Accoppiandone due insieme, il canale da solo non basta a
+                      dire quale sonda si ha in mano. */}
+                  <td className="mono">{c.hw_id ?? '—'}</td>
                   <td className="tabular">{c.moisture}%</td>
                   <td className="tabular">{c.battery_v !== null ? `${c.battery_v.toFixed(1)} V` : '—'}</td>
                   <td className="tabular">{c.seen_seconds_ago}s fa</td>

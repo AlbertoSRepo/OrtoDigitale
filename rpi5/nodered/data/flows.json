@@ -175,6 +175,87 @@
         ]
     },
     {
+        "id": "n-inject-hwids",
+        "type": "inject",
+        "z": "f-ecowitt",
+        "name": "tick 15m",
+        "props": [],
+        "repeat": "900",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "25",
+        "topic": "",
+        "x": 170,
+        "y": 300,
+        "wires": [
+            [
+                "n-fn-hwids-req"
+            ]
+        ]
+    },
+    {
+        "id": "n-fn-hwids-req",
+        "type": "function",
+        "z": "f-ecowitt",
+        "name": "richiesta id gateway",
+        "func": "// Interroga il GW3000 per associare canale -> ID fisico della sonda (step 18).\n//\n// Le pagine di /get_sensors_info non hanno un contenuto garantito: oggi i wh51\n// stanno nella 3, ma e' ordine di firmware, non contratto. Si scandiscono tutte\n// e si tiene cio' che e' wh51. Una pagina senza sonde non produce alcun effetto\n// (vedi `id fisici dal gateway`), quindi lo scan e' idempotente e non serve\n// sapere in anticipo dove guardare.\nconst HOST = env.get('GW3000_HOST') || '192.168.1.5';\nconst PAGINE = 4;\n\nconst richieste = [];\nfor (let p = 1; p <= PAGINE; p++) {\n    richieste.push({\n        url: 'http://' + HOST + '/get_sensors_info?page=' + p,\n        method: 'GET',\n        pagina: p\n    });\n}\nreturn [richieste];",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 400,
+        "y": 300,
+        "wires": [
+            [
+                "n-req-hwids"
+            ]
+        ]
+    },
+    {
+        "id": "n-req-hwids",
+        "type": "http request",
+        "z": "f-ecowitt",
+        "name": "GET GW3000 sensors info",
+        "method": "use",
+        "ret": "txt",
+        "paytoqs": "ignore",
+        "url": "",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 660,
+        "y": 300,
+        "wires": [
+            [
+                "n-fn-hwids-parse"
+            ]
+        ]
+    },
+    {
+        "id": "n-fn-hwids-parse",
+        "type": "function",
+        "z": "f-ecowitt",
+        "name": "id fisici dal gateway",
+        "func": "// Risposta del GW3000 a /get_sensors_info: un array di slot sensore.\n//\n// Interessano solo i wh51 (sonde suolo); il canale sta nel nome, non in un\n// campo suo (\"Soil moisture CH3\"). L'id e' quello stampato sulla sonda, che il\n// gateway restituisce senza gli zeri iniziali: FC98F e' 0fc98f.\n//\n// La mappa vive solo in `global`: non si persiste, esattamente come il campo\n// `gateway` del registro (step 14, D2). Se il GW3000 tace, l'id sparisce dalla\n// vista invece di restare li' a mentire.\nconst NON_ACCOPPIATI = { FFFFFFFF: 1, FFFFFFFE: 1 };\n\nfunction normalizza(grezzo) {\n    const s = String(grezzo || '').trim().toUpperCase();\n    if (!/^[0-9A-F]+$/.test(s) || NON_ACCOPPIATI[s]) return null;\n    return s.toLowerCase().padStart(6, '0');\n}\n\nlet elenco;\ntry {\n    elenco = typeof msg.payload === 'string' ? JSON.parse(msg.payload) : msg.payload;\n} catch (err) {\n    node.warn('GW3000: risposta non JSON da ' + msg.url + ' (' + err.message + ')');\n    return null;\n}\nif (!Array.isArray(elenco)) return null;\n\nconst mappa = Object.assign({}, global.get('gw_hw_ids') || {});\nconst ora = Date.now();\nlet slotSoil = 0;\n\nfor (const s of elenco) {\n    if (String(s.img || '').toLowerCase() !== 'wh51') continue;\n    slotSoil++;\n\n    const trovato = /CH\\s*(\\d+)/i.exec(String(s.name || ''));\n    if (!trovato) continue;\n    const canale = Number(trovato[1]);\n\n    const hw = normalizza(s.id);\n    // Uno slot vuoto e' un canale su cui non c'e' piu' nessuna sonda: va tolto,\n    // non lasciato al valore vecchio, o una sonda sganciata resterebbe a video\n    // per sempre.\n    if (!hw) { delete mappa[canale]; continue; }\n\n    mappa[canale] = { hw_id: hw, ts: ora };\n}\n\n// Una pagina che non contiene sonde non dice nulla sulle sonde: non deve\n// azzerare quanto scoperto dalla pagina che le contiene.\nif (slotSoil) global.set('gw_hw_ids', mappa);\nreturn null;",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 920,
+        "y": 300,
+        "wires": [
+            []
+        ]
+    },
+    {
         "id": "f-valve",
         "type": "tab",
         "label": "Valvola SWV (cmd + stato + safety)",
@@ -2343,7 +2424,7 @@
         "type": "function",
         "z": "f-api-readers",
         "name": "registro sensori",
-        "func": "// GET/PUT /api/sensors/registry — step 14, §5\n//\n// Il registro conserva SOLO l'anagrafica. Posizione e stato gateway sono\n// derivati e vengono aggiunti in lettura: sono una vista, non una copia.\nconst LIVE = '/data/orto_sensors.json';\nconst SEED = '/data/orto_sensors.seed.json';\nconst BAK = '/data/orto_sensors.json.bak';\nconst TMP = '/data/orto_sensors.json.tmp';\n\nconst MAX_CANALI = 8;\nconst VISTO_ENTRO_MS = 30 * 60 * 1000;\n\nfunction rispondi(status, payload) {\n    msg.statusCode = status;\n    msg.headers = { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' };\n    msg.payload = payload;\n    return msg;\n}\n\nasync function carica() {\n    for (const path of [LIVE, SEED]) {\n        try {\n            const d = JSON.parse(await fs.promises.readFile(path, 'utf8'));\n            if (d && Array.isArray(d.sensori)) return d;\n        } catch (err) { /* passa al successivo */ }\n    }\n    return null;\n}\n\n/**\n * sensor_id -> { fila, x } dal layout: e' la sola fonte della posizione.\n *\n * Legge dal FILE se global e' vuoto, e non solo da global: dopo un riavvio,\n * finche' nessuno chiama GET /api/layout, un layout mancante farebbe apparire\n * libere tutte le sonde — e siccome e' la stessa mappa a reggere il blocco\n * alla deregistrazione, in quella finestra si potrebbe cancellare un sensore\n * ancora piazzato.\n */\nasync function posizioni() {\n    let layout = global.get('orto_layout');\n    if (!layout || !Array.isArray(layout.file)) {\n        for (const path of ['/data/orto_layout.json', '/data/orto_layout.seed.json']) {\n            try {\n                const d = JSON.parse(await fs.promises.readFile(path, 'utf8'));\n                if (d && Array.isArray(d.file)) { layout = d; global.set('orto_layout', d); break; }\n            } catch (err) { /* passa al successivo */ }\n        }\n    }\n    const m = {};\n    if (layout && Array.isArray(layout.file)) {\n        for (const fila of layout.file) {\n            for (const s of (fila.sensori || [])) m[s.sensor_id] = { fila: fila.id, x: s.x };\n        }\n    }\n    return m;\n}\n\nfunction validate(d, inUso) {\n    const e = [];\n    const add = (path, code, message) => e.push({ path: path, code: code, message: message });\n\n    if (!d || !Array.isArray(d.sensori)) {\n        add('sensori', 'bad_registry', 'sensori deve essere un array');\n        return e;\n    }\n\n    const visti = {};\n    const canali = {};\n    d.sensori.forEach((s, i) => {\n        const p = 'sensori[' + i + ']';\n        if (typeof s.sensor_id !== 'string' || !/^WH51_\\d\\d$/.test(s.sensor_id)) {\n            add(p + '.sensor_id', 'bad_sensor_id', 'id non conforme a WH51_NN: ' + s.sensor_id);\n        } else if (visti[s.sensor_id]) {\n            add(p + '.sensor_id', 'duplicate_sensor_id', s.sensor_id + ' compare due volte');\n        } else {\n            visti[s.sensor_id] = true;\n        }\n\n        if (!Number.isInteger(s.channel) || s.channel < 1 || s.channel > MAX_CANALI) {\n            add(p + '.channel', 'bad_channel', 'canale fra 1 e ' + MAX_CANALI);\n        } else if (canali[s.channel]) {\n            add(p + '.channel', 'duplicate_channel',\n                'canale ' + s.channel + ' gia assegnato a ' + canali[s.channel]);\n        } else {\n            canali[s.channel] = s.sensor_id;\n        }\n\n        if (typeof s.label !== 'string' || s.label.length > 60) {\n            add(p + '.label', 'bad_label', 'etichetta testuale, massimo 60 caratteri');\n        }\n    });\n\n    // Deregistrare una sonda ancora piazzata lascerebbe il layout a puntare a\n    // un sensore inesistente (step 14, D7).\n    for (const id of Object.keys(inUso)) {\n        if (!visti[id]) {\n            add('sensori', 'sensor_in_use',\n                id + ' e piazzato in fila ' + inUso[id].fila + ': toglilo dalla mappa prima di deregistrarlo');\n        }\n    }\n    return e;\n}\n\nconst dove = await posizioni();\n\n// --------------------------------------------------------------- GET ------\nif (msg.req && String(msg.req.method).toUpperCase() === 'GET') {\n    const reg = await carica();\n    if (!reg) {\n        node.error('nessun registro utilizzabile: ne LIVE ne SEED');\n        return rispondi(500, { ok: false, error: 'registro non disponibile' });\n    }\n    global.set('orto_sensors', reg);\n\n    const now = Date.now();\n    const visti = global.get('gw_seen') || {};\n    const perCanale = {};\n    for (const s of reg.sensori) perCanale[s.channel] = s.sensor_id;\n\n    const sensori = reg.sensori.map(s => {\n        const g = visti[s.channel];\n        const fresco = g && (now - g.ts) < VISTO_ENTRO_MS;\n        return {\n            sensor_id: s.sensor_id,\n            channel: s.channel,\n            label: s.label || '',\n            registered_at: s.registered_at || 0,\n            placement: dove[s.sensor_id] || null,\n            gateway: fresco\n                ? {\n                    seen_seconds_ago: Math.round((now - g.ts) / 1000),\n                    moisture: g.moisture,\n                    battery_v: g.battery_v\n                }\n                : null\n        };\n    });\n\n    const rilevati = Object.keys(visti)\n        .map(Number)\n        .filter(ch => !perCanale[ch] && (now - visti[ch].ts) < VISTO_ENTRO_MS)\n        .sort((a, b) => a - b)\n        .map(ch => ({\n            channel: ch,\n            seen_seconds_ago: Math.round((now - visti[ch].ts) / 1000),\n            moisture: visti[ch].moisture,\n            battery_v: visti[ch].battery_v\n        }));\n\n    return rispondi(200, {\n        version: reg.version || 1,\n        updated_at: reg.updated_at || 0,\n        sensori: sensori,\n        rilevati: rilevati\n    });\n}\n\n// --------------------------------------------------------------- PUT ------\nconst errors = validate(msg.payload, dove);\nif (errors.length) return rispondi(400, { ok: false, errors: errors });\n\nconst prev = await carica();\nconst salvato = {\n    version: 1,\n    updated_at: Math.floor(Date.now() / 1000),\n    sensori: msg.payload.sensori.map(s => ({\n        sensor_id: s.sensor_id,\n        channel: s.channel,\n        label: s.label || '',\n        registered_at: s.registered_at || Math.floor(Date.now() / 1000)\n    }))\n};\n\nif (prev) {\n    try { await fs.promises.writeFile(BAK, JSON.stringify(prev, null, 2)); }\n    catch (err) { node.warn('backup del registro fallito: ' + err.message); }\n}\nawait fs.promises.writeFile(TMP, JSON.stringify(salvato, null, 2));\nawait fs.promises.rename(TMP, LIVE);\n\n// Da qui la prossima lettura del gateway usa il registro nuovo, senza riavvii.\nglobal.set('orto_sensors', salvato);\n\nreturn rispondi(200, salvato);\n",
+        "func": "// GET/PUT /api/sensors/registry — step 14, §5\n//\n// Il registro conserva SOLO l'anagrafica. Posizione e stato gateway sono\n// derivati e vengono aggiunti in lettura: sono una vista, non una copia.\nconst LIVE = '/data/orto_sensors.json';\nconst SEED = '/data/orto_sensors.seed.json';\nconst BAK = '/data/orto_sensors.json.bak';\nconst TMP = '/data/orto_sensors.json.tmp';\n\nconst MAX_CANALI = 8;\nconst VISTO_ENTRO_MS = 30 * 60 * 1000;\n\nfunction rispondi(status, payload) {\n    msg.statusCode = status;\n    msg.headers = { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' };\n    msg.payload = payload;\n    return msg;\n}\n\nasync function carica() {\n    for (const path of [LIVE, SEED]) {\n        try {\n            const d = JSON.parse(await fs.promises.readFile(path, 'utf8'));\n            if (d && Array.isArray(d.sensori)) return d;\n        } catch (err) { /* passa al successivo */ }\n    }\n    return null;\n}\n\n/**\n * sensor_id -> { fila, x } dal layout: e' la sola fonte della posizione.\n *\n * Legge dal FILE se global e' vuoto, e non solo da global: dopo un riavvio,\n * finche' nessuno chiama GET /api/layout, un layout mancante farebbe apparire\n * libere tutte le sonde — e siccome e' la stessa mappa a reggere il blocco\n * alla deregistrazione, in quella finestra si potrebbe cancellare un sensore\n * ancora piazzato.\n */\nasync function posizioni() {\n    let layout = global.get('orto_layout');\n    if (!layout || !Array.isArray(layout.file)) {\n        for (const path of ['/data/orto_layout.json', '/data/orto_layout.seed.json']) {\n            try {\n                const d = JSON.parse(await fs.promises.readFile(path, 'utf8'));\n                if (d && Array.isArray(d.file)) { layout = d; global.set('orto_layout', d); break; }\n            } catch (err) { /* passa al successivo */ }\n        }\n    }\n    const m = {};\n    if (layout && Array.isArray(layout.file)) {\n        for (const fila of layout.file) {\n            for (const s of (fila.sensori || [])) m[s.sensor_id] = { fila: fila.id, x: s.x };\n        }\n    }\n    return m;\n}\n\nfunction validate(d, inUso) {\n    const e = [];\n    const add = (path, code, message) => e.push({ path: path, code: code, message: message });\n\n    if (!d || !Array.isArray(d.sensori)) {\n        add('sensori', 'bad_registry', 'sensori deve essere un array');\n        return e;\n    }\n\n    const visti = {};\n    const canali = {};\n    d.sensori.forEach((s, i) => {\n        const p = 'sensori[' + i + ']';\n        if (typeof s.sensor_id !== 'string' || !/^WH51_\\d\\d$/.test(s.sensor_id)) {\n            add(p + '.sensor_id', 'bad_sensor_id', 'id non conforme a WH51_NN: ' + s.sensor_id);\n        } else if (visti[s.sensor_id]) {\n            add(p + '.sensor_id', 'duplicate_sensor_id', s.sensor_id + ' compare due volte');\n        } else {\n            visti[s.sensor_id] = true;\n        }\n\n        if (!Number.isInteger(s.channel) || s.channel < 1 || s.channel > MAX_CANALI) {\n            add(p + '.channel', 'bad_channel', 'canale fra 1 e ' + MAX_CANALI);\n        } else if (canali[s.channel]) {\n            add(p + '.channel', 'duplicate_channel',\n                'canale ' + s.channel + ' gia assegnato a ' + canali[s.channel]);\n        } else {\n            canali[s.channel] = s.sensor_id;\n        }\n\n        if (typeof s.label !== 'string' || s.label.length > 60) {\n            add(p + '.label', 'bad_label', 'etichetta testuale, massimo 60 caratteri');\n        }\n    });\n\n    // Deregistrare una sonda ancora piazzata lascerebbe il layout a puntare a\n    // un sensore inesistente (step 14, D7).\n    for (const id of Object.keys(inUso)) {\n        if (!visti[id]) {\n            add('sensori', 'sensor_in_use',\n                id + ' e piazzato in fila ' + inUso[id].fila + ': toglilo dalla mappa prima di deregistrarlo');\n        }\n    }\n    return e;\n}\n\nconst dove = await posizioni();\n\n// --------------------------------------------------------------- GET ------\nif (msg.req && String(msg.req.method).toUpperCase() === 'GET') {\n    const reg = await carica();\n    if (!reg) {\n        node.error('nessun registro utilizzabile: ne LIVE ne SEED');\n        return rispondi(500, { ok: false, error: 'registro non disponibile' });\n    }\n    global.set('orto_sensors', reg);\n\n    const now = Date.now();\n    const visti = global.get('gw_seen') || {};\n    // Id fisico stampato sulla sonda, scoperto dal GW3000 (step 18). Derivato\n    // come `gateway`: si legge e basta, il PUT lo ignora.\n    const idFisici = global.get('gw_hw_ids') || {};\n    const perCanale = {};\n    for (const s of reg.sensori) perCanale[s.channel] = s.sensor_id;\n\n    const sensori = reg.sensori.map(s => {\n        const g = visti[s.channel];\n        const fresco = g && (now - g.ts) < VISTO_ENTRO_MS;\n        return {\n            sensor_id: s.sensor_id,\n            channel: s.channel,\n            label: s.label || '',\n            registered_at: s.registered_at || 0,\n            hw_id: (idFisici[s.channel] && idFisici[s.channel].hw_id) || null,\n            placement: dove[s.sensor_id] || null,\n            gateway: fresco\n                ? {\n                    seen_seconds_ago: Math.round((now - g.ts) / 1000),\n                    moisture: g.moisture,\n                    battery_v: g.battery_v\n                }\n                : null\n        };\n    });\n\n    const rilevati = Object.keys(visti)\n        .map(Number)\n        .filter(ch => !perCanale[ch] && (now - visti[ch].ts) < VISTO_ENTRO_MS)\n        .sort((a, b) => a - b)\n        .map(ch => ({\n            channel: ch,\n            hw_id: (idFisici[ch] && idFisici[ch].hw_id) || null,\n            seen_seconds_ago: Math.round((now - visti[ch].ts) / 1000),\n            moisture: visti[ch].moisture,\n            battery_v: visti[ch].battery_v\n        }));\n\n    return rispondi(200, {\n        version: reg.version || 1,\n        updated_at: reg.updated_at || 0,\n        sensori: sensori,\n        rilevati: rilevati\n    });\n}\n\n// --------------------------------------------------------------- PUT ------\nconst errors = validate(msg.payload, dove);\nif (errors.length) return rispondi(400, { ok: false, errors: errors });\n\nconst prev = await carica();\nconst salvato = {\n    version: 1,\n    updated_at: Math.floor(Date.now() / 1000),\n    sensori: msg.payload.sensori.map(s => ({\n        sensor_id: s.sensor_id,\n        channel: s.channel,\n        label: s.label || '',\n        registered_at: s.registered_at || Math.floor(Date.now() / 1000)\n    }))\n};\n\nif (prev) {\n    try { await fs.promises.writeFile(BAK, JSON.stringify(prev, null, 2)); }\n    catch (err) { node.warn('backup del registro fallito: ' + err.message); }\n}\nawait fs.promises.writeFile(TMP, JSON.stringify(salvato, null, 2));\nawait fs.promises.rename(TMP, LIVE);\n\n// Da qui la prossima lettura del gateway usa il registro nuovo, senza riavvii.\nglobal.set('orto_sensors', salvato);\n\nreturn rispondi(200, salvato);\n",
         "outputs": 1,
         "timeout": "",
         "noerr": 0,
