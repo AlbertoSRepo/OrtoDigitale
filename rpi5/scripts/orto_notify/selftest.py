@@ -382,7 +382,90 @@ def _sezione_modello():
     prova("l'anomalia porta con se' la spiegazione", spiegazione_presente)
 
 
-SEZIONI = [_sezione_influx, _sezione_features, _sezione_guardie, _sezione_modello]
+def _sezione_conferma():
+    from datetime import datetime, timedelta, timezone
+    from orto_notify import confirm, state
+
+    print("conferma e anti-spam")
+
+    ADESSO = datetime(2026, 8, 17, 12, 0, tzinfo=timezone.utc)
+
+    def anomalia(sonda="WH51_01", tipo="muta"):
+        return {"sensor_id": sonda, "tipo": tipo, "ora": ADESSO, "dettagli": {}}
+
+    def primo_alert_passa():
+        da_inviare, _ = confirm.filtra([anomalia()], {}, ADESSO)
+        assert len(da_inviare) == 1, da_inviare
+
+    def secondo_alert_entro_cooldown_soppresso():
+        da_inviare, stato = confirm.filtra([anomalia()], {}, ADESSO)
+        assert len(da_inviare) == 1
+        dopo, _ = confirm.filtra([anomalia()], stato, ADESSO + timedelta(hours=3))
+        assert dopo == [], dopo
+
+    def dopo_il_cooldown_riparte():
+        _, stato = confirm.filtra([anomalia()], {}, ADESSO)
+        dopo, _ = confirm.filtra([anomalia()], stato, ADESSO + timedelta(hours=25))
+        assert len(dopo) == 1, dopo
+
+    def cooldown_batteria_calo_e_settimanale():
+        _, stato = confirm.filtra([anomalia(tipo="batteria_calo")], {}, ADESSO)
+        a_2_giorni, _ = confirm.filtra(
+            [anomalia(tipo="batteria_calo")], stato, ADESSO + timedelta(days=2))
+        assert a_2_giorni == [], a_2_giorni
+        a_8_giorni, _ = confirm.filtra(
+            [anomalia(tipo="batteria_calo")], stato, ADESSO + timedelta(days=8))
+        assert len(a_8_giorni) == 1
+
+    def tipi_diversi_non_si_zittiscono():
+        _, stato = confirm.filtra([anomalia(tipo="muta")], {}, ADESSO)
+        altro, _ = confirm.filtra([anomalia(tipo="batteria_bassa")], stato, ADESSO)
+        assert len(altro) == 1, altro
+
+    def sonde_diverse_non_si_zittiscono():
+        _, stato = confirm.filtra([anomalia(sonda="WH51_01")], {}, ADESSO)
+        altra, _ = confirm.filtra([anomalia(sonda="WH51_02")], stato, ADESSO)
+        assert len(altra) == 1, altra
+
+    def normalita_prolungata_azzera():
+        _, stato = confirm.filtra([anomalia()], {}, ADESSO)
+        # sei ore senza anomalie
+        _, stato = confirm.filtra([], stato, ADESSO + timedelta(hours=7))
+        di_nuovo, _ = confirm.filtra([anomalia()], stato, ADESSO + timedelta(hours=8))
+        assert len(di_nuovo) == 1, di_nuovo
+
+    def rientro_segnalato_una_volta_sola():
+        _, stato = confirm.filtra([anomalia()], {}, ADESSO)
+        tornate = confirm.rientri([], stato, ADESSO + timedelta(hours=7))
+        assert "WH51_01" in tornate, tornate
+        _, stato2 = confirm.filtra([], stato, ADESSO + timedelta(hours=7))
+        ancora = confirm.rientri([], stato2, ADESSO + timedelta(hours=8))
+        assert "WH51_01" not in ancora, ancora
+
+    def stato_gira_su_json(tmp="/tmp/orto_notify_prova_stato.json"):
+        import os
+        originale = {"WH51_01": {"muta": {"ultimo_invio": ADESSO.isoformat()}}}
+        state.salva(tmp, originale)
+        riletto = state.carica(tmp)
+        assert riletto == originale, riletto
+        os.remove(tmp)
+
+    def stato_mancante_e_dizionario_vuoto():
+        assert state.carica("/tmp/non-esiste-affatto-12345.json") == {}
+
+    prova("il primo alert passa", primo_alert_passa)
+    prova("il secondo entro 24 h e' soppresso", secondo_alert_entro_cooldown_soppresso)
+    prova("dopo il cooldown riparte", dopo_il_cooldown_riparte)
+    prova("batteria_calo ha cooldown di 7 giorni", cooldown_batteria_calo_e_settimanale)
+    prova("tipi diversi non si zittiscono a vicenda", tipi_diversi_non_si_zittiscono)
+    prova("sonde diverse non si zittiscono a vicenda", sonde_diverse_non_si_zittiscono)
+    prova("sei ore di normalita' azzerano il cooldown", normalita_prolungata_azzera)
+    prova("il rientro si annuncia una volta sola", rientro_segnalato_una_volta_sola)
+    prova("lo stato fa andata e ritorno su JSON", stato_gira_su_json)
+    prova("stato mancante = dizionario vuoto", stato_mancante_e_dizionario_vuoto)
+
+
+SEZIONI = [_sezione_influx, _sezione_features, _sezione_guardie, _sezione_modello, _sezione_conferma]
 
 
 if __name__ == "__main__":
