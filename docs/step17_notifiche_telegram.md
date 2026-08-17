@@ -723,4 +723,51 @@ produzione, che addestra il modello una volta per ciclo su una finestra fissa di
 
 ## Implementazione
 
-*(Da compilare al completamento, secondo il pattern obbligatorio di `CLAUDE.md`.)*
+**Stato:** ✅ COMPLETATO (fase 1) — 2026-08-17
+
+**Commit di riferimento:** `feat(scripts): unit systemd e deploy delle notifiche Telegram` (`af2b3b3`)
+
+**Note:**
+
+Tredici commit sul branch. Il banco di prova (`python3 -m orto_notify.selftest`) conta
+**56 test**: i 53 pianificati più i 3 aggiunti dai due bug di produzione descritti sotto.
+I test Node-RED sono rimasti verdi e intatti, perché questo step non ha mai toccato
+`flows.json` — coerente con D2.
+
+La taratura (§4.3, §9, "Taratura" più sopra) non ha richiesto di cambiare nessuna soglia:
+WH51_01 produce 3,74 alert/settimana contro 0,23–0,46 delle sonde sane, una separazione di
+un fattore 8-16.
+
+In produzione: il primo messaggio reale è stato inviato e ricevuto il 2026-08-17 (l'avviso
+di batteria in calo su WH51_01 confermato dall'utente sul telefono). L'anti-spam è stato
+verificato sul campo subito dopo: una seconda esecuzione immediata ha rilevato la stessa
+anomalia e correttamente non ha inviato nulla (cooldown attivo). Il timer gira ogni 15
+minuti e consuma circa 1,4 s di CPU per esecuzione.
+
+**Deviazioni dalla spec:**
+
+1. **Aggiunto un modulo `messages.py`** non previsto dal §7 della spec, che lasciava il
+   testo dei messaggi dentro `telegram.py`. Separare il contenuto dal trasporto ha permesso
+   di testare il testo dei messaggi senza toccare la rete.
+
+2. **Due bug emersi solo con dati reali**, non coperti dai 53 test pianificati, entrambi
+   bloccanti, ora entrambi coperti da test:
+   - `stddev()` su un bucket orario a campione singolo restituisce la stringa `"NaN"`, che
+     `float()` accetta senza errori; il valore arrivava così fino all'Isolation Forest, che
+     lo rifiutava, interrompendo l'**intero** ciclo — incluse le guardie deterministiche. 12
+     righe su 2886 in 30 giorni, tutte di WH51_01: proprio la sonda che il servizio esiste
+     per sorvegliare.
+   - Il bucket parziale dell'ora corrente si frammentava in cinque righe: le cinque
+     sotto-query girano in istanti leggermente diversi, quindi `aggregateWindow` etichettava
+     il bucket ancora aperto con cinque timestamp leggermente diversi e la join non trovava
+     mai la chiave comune. Ogni frammento aveva quattro campi su cinque vuoti, diventati
+     `0.0`, e il modello leggeva quel profilo tutto-zero come un'anomalia vistosa su tutte e
+     quattro le sonde, a ogni ciclo — quattro notifiche false ogni quarto d'ora. Risolto
+     scartando i bucket non allineati a un'ora esatta.
+
+3. **Il backtest è girato su 30 giorni invece dei 100 pianificati** (vedi "Nota: il backtest
+   è girato su 30 giorni, non 100" più sopra): `_backtest()` riaddestra il modello a ogni ora
+   replayata su una finestra crescente, quindi il suo costo cresce grosso modo con il
+   quadrato del periodo; a 100 giorni non aveva finito dopo 17 minuti di CPU piena. Trenta
+   giorni soddisfano comunque entrambe le metà del criterio di accettazione. Riguarda solo
+   questa taratura una tantum, mai il ciclo di produzione. Debito noto.
