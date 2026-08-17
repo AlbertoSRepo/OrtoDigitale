@@ -188,7 +188,126 @@ def _sezione_features():
     prova("nessun None arriva alla matrice", nessun_none_nella_matrice)
 
 
-SEZIONI = [_sezione_influx, _sezione_features]
+def _sezione_guardie():
+    from datetime import datetime, timedelta, timezone
+    from orto_notify import detect
+
+    print("guardie deterministiche")
+
+    ADESSO = datetime(2026, 8, 17, 12, 0, tzinfo=timezone.utc)
+
+    def serie(sonda="WH51_01", ore=48, **campi):
+        fuori = []
+        for h in range(ore, 0, -1):
+            r = {
+                "sensor_id": sonda, "ora": ADESSO - timedelta(hours=h),
+                "campioni": 60, "media": 50.0, "sigma": 1.0, "batteria": 1.60,
+                "silenzio_max_min": 1.0, "tasso_consegna": 1.0,
+                "delta_batteria_24h": 0.0, "scarto_da_sorelle": 0.0,
+                "ore_bloccate": 0,
+            }
+            r.update(campi)
+            fuori.append(r)
+        return fuori
+
+    def tipi(anomalie):
+        return sorted({a["tipo"] for a in anomalie})
+
+    def vivo(quando_min=0):
+        # ultimo campione "adesso meno quando_min minuti", per ogni sonda
+        return {s: ADESSO - timedelta(minutes=quando_min)
+                for s in ("WH51_01", "WH51_02", "WH51_03", "WH51_04")}
+
+    def muta_dopo_45_minuti():
+        out = detect.guardie(serie(), ADESSO, [], ultimi=vivo(52))
+        assert "muta" in tipi(out), tipi(out)
+
+    def non_muta_a_20_minuti():
+        out = detect.guardie(serie(), ADESSO, [], ultimi=vivo(20))
+        assert "muta" not in tipi(out), tipi(out)
+
+    def bucket_orario_vecchio_non_e_silenzio():
+        # Il bucket piu' recente e' sempre vecchio fino a 60 min per costruzione:
+        # se il silenzio si misurasse da li', ogni sonda sarebbe sempre muta.
+        out = detect.guardie(serie(), ADESSO, [], ultimi=vivo(2))
+        assert "muta" not in tipi(out), tipi(out)
+
+    def sonda_assente_da_ultimi_e_muta():
+        ultimi = vivo(2)
+        del ultimi["WH51_01"]
+        out = detect.guardie(serie(), ADESSO, [], ultimi=ultimi)
+        assert "muta" in tipi(out), tipi(out)
+
+    def batteria_bassa_con_tre_letture():
+        out = detect.guardie(serie(batteria=1.12), ADESSO, [], ultimi=vivo(2))
+        assert "batteria_bassa" in tipi(out), tipi(out)
+
+    def batteria_bassa_singola_non_basta():
+        righe = serie()
+        righe[-1]["batteria"] = 1.12
+        out = detect.guardie(righe, ADESSO, [], ultimi=vivo(2))
+        assert "batteria_bassa" not in tipi(out), tipi(out)
+
+    def serie_batteria(pendenza_totale):
+        righe = []
+        for h in range(168, 0, -1):
+            v = 1.60 - (168 - h) * (pendenza_totale / 168.0)
+            riga = serie(ore=1, batteria=v)[0]
+            riga["ora"] = ADESSO - timedelta(hours=h)
+            righe.append(riga)
+        return righe
+
+    def batteria_in_calo():
+        # -0.09 V in 7 giorni = -0.09 V/settimana, oltre la soglia -0.02
+        out = detect.guardie(serie_batteria(0.09), ADESSO, [], ultimi=vivo(2))
+        assert "batteria_calo" in tipi(out), tipi(out)
+
+    def batteria_piatta_non_allerta():
+        out = detect.guardie(serie_batteria(0.0), ADESSO, [], ultimi=vivo(2))
+        assert "batteria_calo" not in tipi(out), tipi(out)
+
+    def valore_bloccato_con_sorella_che_si_muove():
+        righe = serie(sonda="WH51_01", ore_bloccate=14, sigma=0.0)
+        sorella = serie(sonda="WH51_02")
+        for i, r in enumerate(sorella):
+            r["media"] = 50.0 + i * 0.5     # varia di 24 pp nell'arco
+        out = detect.guardie(righe + sorella, ADESSO, [], ultimi=vivo(2))
+        assert "valore_bloccato" in tipi(out), tipi(out)
+
+    def valore_fermo_ma_tutte_ferme_non_allerta():
+        righe = serie(sonda="WH51_01", ore_bloccate=14, sigma=0.0)
+        sorella = serie(sonda="WH51_02", ore_bloccate=14, sigma=0.0)
+        out = detect.guardie(righe + sorella, ADESSO, [], ultimi=vivo(2))
+        assert "valore_bloccato" not in tipi(out), tipi(out)
+
+    def irrigazione_zittisce_tutto():
+        finestre = [(ADESSO - timedelta(hours=48), ADESSO + timedelta(hours=1))]
+        out = detect.guardie(serie(batteria=1.12), ADESSO, finestre, ultimi=vivo(52))
+        assert out == [], out
+
+    def senza_ultimi_ripiega_sui_bucket():
+        # Modalita' backtest: nessun "ultimo campione", si stima dai bucket.
+        righe = serie()
+        for r in righe[-3:]:
+            r["campioni"] = 0
+        out = detect.guardie(righe, ADESSO, [], ultimi=None)
+        assert "muta" in tipi(out), tipi(out)
+
+    prova("muta dopo 52 minuti di silenzio", muta_dopo_45_minuti)
+    prova("non muta a 20 minuti", non_muta_a_20_minuti)
+    prova("un bucket orario vecchio non e' silenzio", bucket_orario_vecchio_non_e_silenzio)
+    prova("sonda assente dall'ultimo giro e' muta", sonda_assente_da_ultimi_e_muta)
+    prova("batteria bassa con tre letture consecutive", batteria_bassa_con_tre_letture)
+    prova("una sola lettura bassa non basta", batteria_bassa_singola_non_basta)
+    prova("batteria in calo oltre la pendenza di soglia", batteria_in_calo)
+    prova("batteria piatta non allerta", batteria_piatta_non_allerta)
+    prova("valore bloccato solo se una sorella si muove", valore_bloccato_con_sorella_che_si_muove)
+    prova("se tutte sono ferme non e' un guasto", valore_fermo_ma_tutte_ferme_non_allerta)
+    prova("dentro la finestra di irrigazione tutti tacciono", irrigazione_zittisce_tutto)
+    prova("senza ultimi si ripiega sui bucket orari", senza_ultimi_ripiega_sui_bucket)
+
+
+SEZIONI = [_sezione_influx, _sezione_features, _sezione_guardie]
 
 
 if __name__ == "__main__":
