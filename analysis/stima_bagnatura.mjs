@@ -289,3 +289,48 @@ for (const [nome, arr] of [['irrigazione', irrigazioneClassificata], ['pioggia',
 const candidatiIrrigazione = irrigazioneClassificata.filter((f) => f.esito === 'irrigazione');
 const candidatiPioggia = pioggiaClassificata.filter((f) => f.esito === 'pioggia');
 console.log(`candidati puliti: ${candidatiIrrigazione.length} irrigazione, ${candidatiPioggia.length} pioggia`);
+
+// ============================================================
+// FASE E — fitting. Stessi percentili 10/50/90 di k, sulla stessa
+// aritmetica nearest-rank. Guardia a 15 campioni minimi (vincoli
+// globali): sotto quella soglia il coefficiente resta null, non si
+// forza un numero da un campione non significativo.
+// ============================================================
+function fitCoefficiente(candidati, campo) {
+  if (candidati.length < 15) return null;
+  const rapporti = candidati
+    .map((c) => c.residuo / c[campo])
+    .filter(Number.isFinite)
+    .sort((x, y) => x - y);
+  if (rapporti.length < 15) return null;
+  return { n: rapporti.length, p10: perc(rapporti, 0.1), mediana: perc(rapporti, 0.5), p90: perc(rapporti, 0.9) };
+}
+
+const wIrrStat = fitCoefficiente(candidatiIrrigazione, 'litri');
+const wRainStat = fitCoefficiente(candidatiPioggia, 'mm');
+
+console.log('\n--- FASE E: fitting w_irr / w_rain ---');
+if (!wIrrStat) {
+  console.log(`w_irr: DATI INSUFFICIENTI (${candidatiIrrigazione.length} candidati, servono >= 15)`);
+} else {
+  console.log(`w_irr = ${wIrrStat.mediana.toFixed(4)} %/L  (n=${wIrrStat.n}, p10=${wIrrStat.p10.toFixed(4)}, p90=${wIrrStat.p90.toFixed(4)})`);
+  if (!(wIrrStat.p10 <= wIrrStat.mediana && wIrrStat.mediana <= wIrrStat.p90)) {
+    console.error(`ordinamento p10 <= w_irr <= p90 VIOLATO — non usare questo valore`);
+    process.exit(1);
+  }
+}
+if (!wRainStat) {
+  console.log(`w_rain: DATI INSUFFICIENTI (${candidatiPioggia.length} candidati, servono >= 15)`);
+} else {
+  console.log(`w_rain = ${wRainStat.mediana.toFixed(4)} %/mm  (n=${wRainStat.n}, p10=${wRainStat.p10.toFixed(4)}, p90=${wRainStat.p90.toFixed(4)})`);
+  if (!(wRainStat.p10 <= wRainStat.mediana && wRainStat.mediana <= wRainStat.p90)) {
+    console.error(`ordinamento p10 <= w_rain <= p90 VIOLATO — non usare questo valore`);
+    process.exit(1);
+  }
+}
+if (!wIrrStat && !wRainStat) {
+  console.error('\nNessuno dei due coefficienti e stimabile con i dati attuali.');
+  console.error('Esito valido per la fase 1 (spec §5): fermarsi qui, servono piu settimane');
+  console.error('di mode=auto (eventi trigger=auto sono puliti per costruzione) prima di riprovare.');
+  process.exit(1);
+}
