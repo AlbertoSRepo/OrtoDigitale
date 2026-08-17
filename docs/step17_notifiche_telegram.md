@@ -613,6 +613,114 @@ Da applicare **prima** del commit finale, in un unico blocco:
 
 ---
 
+## Taratura
+
+Retro-verifica sullo storico prevista da §9, eseguita sul Raspberry Pi il 2026-08-17 con le
+credenziali che vivono solo lì (misura fatta come controller; qui si registra l'esito). Il
+criterio era stato fissato **prima** di guardare i numeri:
+
+> «meno di un alert a settimana per sonda sana, e almeno un alert su WH51_01 nella finestra
+> del 16/08» (§9).
+
+Cioè: meno di un alert a settimana su ciascuna delle tre sonde sane (WH51_02, WH51_03,
+WH51_04), e almeno un alert su WH51_01 nella finestra intorno al 2026-08-16.
+
+**Esito: nessuna soglia è stata cambiata.** I valori scelti sulla carta (§4.3) hanno retto
+al confronto con i dati. Non è un'assenza di lavoro: è il risultato della taratura.
+
+### Misura 1 — il backtest
+
+Comando eseguito sul Raspberry Pi, con scikit-learn 1.4.2 installato da apt:
+
+```
+ssh as@192.168.1.12 'set -a; . /opt/orto-digitale/.env; set +a; cd /tmp && python3 -m orto_notify --backtest 30'
+```
+
+Output:
+
+```
+periodo: 2026-07-18 .. 2026-08-17 (4.3 settimane)
+sonda      tipo                alert  per sett.
+WH51_01    anomalia                5       1.17
+WH51_01    batteria_calo           2       0.47
+WH51_01    muta                    9       2.10
+WH51_02    muta                    1       0.23
+WH51_03    muta                    1       0.23
+WH51_03    valore_bloccato         1       0.23
+WH51_04    batteria_calo           1       0.23
+WH51_04    muta                    1       0.23
+```
+
+Totali per sonda: WH51_01 = 3,74 alert/settimana; WH51_02 = 0,23; WH51_03 = 0,46;
+WH51_04 = 0,46. Prima metà del criterio soddisfatta, con ampio margine: tutte e tre le
+sonde sane restano sotto la soglia di 1 alert/settimana.
+
+### Misura 2 — replay mirato sul 15-18 agosto
+
+La tabella del backtest non porta le date, quindi per verificare la seconda metà del
+criterio le guardie sono state rigiocate ora per ora specificamente su quella finestra:
+
+```
+WH51_01   batteria_calo    65 ore, prima: 15/08 00:00
+WH51_01   muta             20 ore, prima: 15/08 01:00
+WH51_02   muta              4 ore, prima: 17/08 21:00
+WH51_03   muta              4 ore, prima: 17/08 21:00
+WH51_03   valore_bloccato   1 ore, prima: 15/08 14:00
+WH51_04   muta              4 ore, prima: 17/08 21:00
+```
+
+Seconda metà del criterio soddisfatta: WH51_01 avrebbe generato il primo alert già alle
+15/08 00:00, ben dentro la finestra del 16/08.
+
+### Misura 3 — pendenza della batteria su 30 giorni
+
+```
+sonda        min V    max V  pend/sett
+WH51_01      1.500    1.600  -0.0144
+WH51_02      1.600    1.600  -0.0000
+WH51_03      1.600    1.600  -0.0000
+WH51_04      1.500    1.600  -0.0081
+```
+
+### Tre cose da sapere prima di fidarsi di un alert
+
+**1. I `muta` delle sonde sane in Misura 2 sono un artefatto del bordo del replay, non
+falsi positivi.** Le tre righe di WH51_02/03/04 scattano tutte alle 17/08 21:00, che è
+esattamente dove finiscono i dati del replay: in un replay ogni sonda risulta muta oltre
+l'ultimo campione disponibile, perché non esiste un "dopo". In produzione `adesso` è il
+tempo reale e i dati continuano ad arrivare, quindi questa situazione non si può
+presentare. Il tasso di falsi positivi reale sulle sonde sane è perciò **più basso** di
+quanto suggerisce questa tabella — nessuna correzione necessaria, va solo tenuto a mente
+leggendo il numero.
+
+**2. Il `batteria_calo` di WH51_04 in Misura 1 è una misura vera, non un difetto del
+rilevatore.** La sua batteria si è mossa davvero tra 1,600 e 1,500 V (Misura 3). Le sonde
+WH51 riportano la tensione a gradini grossolani — in un mese intero compaiono solo i
+valori 1,5 e 1,6 V — quindi una sonda che oscilla tra due gradini adiacenti produce una
+pendenza apparente dentro la finestra di regressione a 7 giorni di G3 (§4.3). Sui 30
+giorni interi la sua pendenza è −0,0081 V/settimana, ben sotto la soglia di
+−0,02 V/settimana: l'alert nasce da una finestra più corta in cui l'oscillazione sembrava
+una tendenza. **Conseguenza pratica: un alert `batteria_calo` su una sonda che legge ancora
+tra 1,5 e 1,6 V merita di essere letto guardando l'andamento su un mese prima di comprare
+pile** — e il cooldown di 7 giorni (§4.5) già limita quante volte può ripresentarsi.
+
+**3. Il rilevatore discrimina di un fattore 8-16.** WH51_01 a 3,74 alert/settimana contro
+0,23-0,46 delle sonde sane: non sono i conteggi assoluti a dire che la taratura funziona,
+è questo scarto.
+
+### Nota: il backtest è girato su 30 giorni, non 100
+
+`_backtest()` riaddestra l'Isolation Forest a **ogni ora replayata**, su una finestra che
+cresce man mano che il replay avanza: il costo cresce grosso modo con il quadrato del
+periodo. A 100 giorni non aveva finito dopo 17 minuti di CPU piena sul Pi; a 30 giorni
+completa in un paio di minuti. Trenta giorni bastano comunque a soddisfare entrambe le
+metà del criterio: 4,3 settimane di replay (Misura 1) e copertura piena della finestra del
+16 agosto (Misura 2). Il difetto riguarda solo questa taratura una tantum, mai il ciclo di
+produzione, che addestra il modello una volta per ciclo su una finestra fissa di 30 giorni
+(§4.1, §4.4). Va registrato come debito noto, non risolto qui.
+
+---
+
 ## Implementazione
 
 *(Da compilare al completamento, secondo il pattern obbligatorio di `CLAUDE.md`.)*
