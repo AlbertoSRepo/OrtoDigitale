@@ -1,7 +1,9 @@
 # Orto Digitale v1.1 — Guida Architetturale per Claude Code
 
 ## Contesto progetto
-Sistema di irrigazione automatica completamente **locale** (no cloud) per un orto residenziale ~40 m² con 3 aiuole. Gira interamente su un Raspberry Pi 5. Sviluppo su PC Windows, deploy via SSH.
+Sistema di irrigazione automatica per un orto residenziale ~40 m² con 3 aiuole. Gira interamente su un Raspberry Pi 5. Sviluppo su PC Windows, deploy via SSH.
+
+Il **ciclo di controllo dell'irrigazione** (sensori → decisione → valvola → sicurezza) è completamente locale e resta funzionante senza internet. I servizi esterni sono ammessi solo come input opzionali con degradazione dichiarata (Open-Meteo) o canali di notifica best-effort in uscita (Telegram). Nessuna decisione di irrigazione può dipendere dalla loro disponibilità. Un canale esterno che **comanda** la valvola richiede una decisione esplicita e separata: al 2026-08 non è autorizzato.
 
 ---
 
@@ -11,7 +13,7 @@ Sistema di irrigazione automatica completamente **locale** (no cloud) per un ort
 |---|---|
 | RPi hostname | `as` — **MAI rinominare in `rpi5-orto`** |
 | RPi SSH | `ssh as@192.168.1.12` (Ethernet, primario) — se non risponde: `ssh as@192.168.1.46` (WiFi) |
-| RPi OS | RPi OS Lite 64-bit, Debian Bookworm, ARM64/aarch64 |
+| RPi OS | RPi OS Lite 64-bit, Debian 13 (Trixie), ARM64/aarch64 |
 | Docker | Engine 26.x+, Compose v2 |
 | Root progetto RPi | `/opt/orto-digitale/` |
 | Compose file | `rpi5/docker-compose.yml` |
@@ -91,14 +93,26 @@ Utenti in `mosquitto/config/password_file`: `gw3000`, `nodered`, `zigbee2mqtt`, 
 - `token-grafana-ro` → Read only (usato da Grafana)
 - `token-export-ro` → Read only (usato per export CSV)
 
+## Altre variabili del container `nodered`
+
+- `GW3000_HOST` → indirizzo del gateway, default `192.168.1.5` nel compose
+  (step 18: Node-RED lo interroga su `/get_sensors_info` per gli id fisici).
+  Non serve valorizzarla in `.env` a meno che il GW3000 cambi indirizzo.
+
 ---
 
 ## Schema dati InfluxDB — bucket `garden`
 
 | Measurement | Tag | Field |
 |---|---|---|
-| `soil_moisture` | `sensor_id` (WH51_01–06), `aiuola` (1/2/3), `position` (near/far) | `value` (float %), `battery_voltage`, `battery_ok`, `rssi` |
+| `soil_moisture` | `sensor_id` (WH51_01–06), `aiuola` (1/2/3), `position` (near/far) | `value` (float %), `battery_voltage`, `battery_ok` |
 | `irrigation_events` | `trigger` (auto/manual), `valve_id` | `state`, `duration_seconds`, `avg_moisture_at_trigger`, `reason` (vedi sotto), `total_liters` (float, integrale flow — **inaffidabile**, vedi footgun 5b), `liters_sample_count` (int), `liters_method` (`integrated`/`unavailable`) |
+
+> ⚠️ `soil_moisture` **non** ha un field `rssi`: non è mai stato scritto, e non potrebbe
+> esserlo, perché il payload MQTT del GW3000 contiene solo `soilmoisture{N}` e
+> `soilbatt{N}` — il gateway non pubblica alcun indicatore di potenza del segnale. La
+> "qualità del segnale" va dedotta dalla **regolarità di arrivo** dei campioni, non da un
+> field che non esiste.
 
 ### Valori di `reason` in `irrigation_events`
 
@@ -128,18 +142,37 @@ freschezza a 120 s e fallback al trigger se assente.
 
 ## Mapping sensori → aiuole
 
-| Sensore | Aiuola | Posizione | Luogo fisico |
-|---|---|---|---|
-| `WH51_01` | 1 | near | Aiuola sinistra, 2m dall'ingresso acqua |
-| `WH51_02` | 1 | far | Aiuola sinistra, 8m dall'ingresso acqua |
-| `WH51_03` | 2 | near | Aiuola centrale, 2m dall'ingresso acqua |
-| `WH51_04` | 2 | far | Aiuola centrale, 8m dall'ingresso acqua |
-| `WH51_05` | 3 | near | Aiuola destra, 2m dall'ingresso acqua *(non installato)* |
-| `WH51_06` | 3 | far | Aiuola destra, 8m dall'ingresso acqua *(non installato)* |
+Collocazione reale al **2026-08-17** (`GET /api/layout`):
 
-> Dallo step 12 questa tabella è un **fallback**. La collocazione autoritativa è
+| Sensore | Canale | `hw_id` | Fila | x | Dove |
+|---|---|---|---|---|---|
+| `WH51_01` | 1 | `0fc98f` | 1 | 0.124 | fila 1, sinistra |
+| `WH51_02` | 2 | `0fd067` | 1 | 0.866 | fila 1, destra |
+| `WH51_03` | 3 | `0fd04e` | 3 | 0.103 | fila 3, sinistra |
+| `WH51_04` | 4 | `0fcdf2` | 2 | 0.5 | fila 2, centro |
+
+> `hw_id` è l'id stampato sulla sonda, scoperto dal GW3000 (step 18): è
+> **derivato e non memorizzato**, segue il canale e non il `sensor_id`.
+> Non entra in InfluxDB.
+
+Fallback cablato nel codice (`SENSOR_LOCATIONS` nel frontend, `FALLBACK` in
+`parse WH51`), usato **solo** se il layout non risponde — non descrive più il
+campo:
+
+| Sensore | Aiuola | Posizione |
+|---|---|---|
+| `WH51_01` / `WH51_02` | 1 | near / far |
+| `WH51_03` / `WH51_04` | 2 | near / far |
+| `WH51_05` / `WH51_06` | 3 | near / far *(non installati)* |
+
+> Dallo step 12 quella tabella è un **fallback**. La collocazione autoritativa è
 > `GET /api/layout`, e `SENSOR_LOCATIONS` nel frontend serve solo quando il layout
 > non risponde.
+>
+> ⚠️ `WH51_03` è stato in fila 3 per circa un mese mentre il layout diceva
+> fila 2: i suoi punti fino al 2026-08-17 portano `aiuola=2` e **non sono
+> correggibili** (tag immutabili). L'irrigazione non ne risente, la media
+> ignora l'aiuola.
 
 > **Nota:** i tag `aiuola`/`position` sono derivati dal **layout** (`GET /api/layout`), non più costanti. Migrati allo step 12 — prima valevano la stringa letterale `test`.
 > I punti scritti prima del 2026-08-15 conservano `aiuola=test`: in InfluxDB i tag dei punti già scritti sono immutabili.
@@ -172,7 +205,7 @@ Il GW3000 pubblica **tutti i sensori** in un unico topic `ecowitt/gw3000` come s
 | Soglia chiusura | > 65% umidità media |
 | Durata max auto-irrigazione | 15 min (`safety_timeout_seconds = 900`) |
 | Durata max apertura manuale | 1 h (`manual_max_duration_seconds = 3600`) |
-| Cooldown | 4 ore tra irrigazioni |
+| Cooldown | 2 ore tra irrigazioni |
 | Finestre orarie | 06:00–08:00 e 19:00–01:00 |
 | Polling | ogni 5 min |
 
@@ -201,6 +234,8 @@ Il GW3000 pubblica **tutti i sensori** in un unico topic `ecowitt/gw3000` come s
 | 14 | Registro sensori con scoperta dal gateway | ✅ |
 | 15 | Previsione prossima irrigazione (modello ET0 + fascia incertezza) | ✅ |
 | 16 | Modello di bagnatura (fase 1 — analisi offline: w_irr/w_rain) | ✅ analisi (fase 1); ⏳ produzione (fase 2 da rivalutare quando ci sarà più storico mode=auto — vedi analysis/04_modello_bagnatura.md) |
+| 17 | Notifiche Telegram (fase 1 — salute sonde) | ✅ salute sonde in produzione dal 2026-08-17; ⏳ bagnatura (fase 2, serve la taratura per-sonda — vedi docs/step17_notifiche_telegram.md §6.2) |
+| 18 | Id fisico delle sonde dal GW3000 | ✅ |
 
 ---
 
@@ -218,6 +253,8 @@ Il GW3000 pubblica **tutti i sensori** in un unico topic `ecowitt/gw3000` come s
 | `rpi5/scripts/verify_rpi5.sh` | Healthcheck 10-check |
 | `docs/frontend_dati_spec.md` | Spec dati per step 5 |
 | `rpi5/nodered/data/orto_layout.seed.json` | Layout orto di partenza (aree coltura + posizione sonde) |
+| `rpi5/nodered/data/orto_sensors.seed.json` | Registro sensori di partenza (WH51_01–04 sui canali 1–4) |
+| `rpi5/scripts/orto_notify/` | Servizio di notifica Telegram — gira sull'**host**, fuori da Docker, sotto `orto-notify.timer` ogni 15 min. Non tocca `flows.json`: un suo errore non può raggiungere il decision loop. Il token Telegram sta in `.env`, quindi **non** entra nel giro di ri-iniezione credenziali di §5.5 |
 
 ### Pattern obbligatorio per docs/stepN_*.md
 

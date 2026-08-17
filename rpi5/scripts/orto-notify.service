@@ -1,0 +1,10 @@
+[Unit]
+Description=Orto Digitale - notifiche Telegram sulla salute delle sonde
+After=multi-user.target docker.service
+
+[Service]
+Type=oneshot
+User=as
+WorkingDirectory=/opt/orto-digitale/scripts
+EnvironmentFile=/opt/orto-digitale/.env
+ExecStart=/usr/bin/python3 -m orto_notify --once

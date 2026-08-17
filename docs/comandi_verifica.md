@@ -341,3 +341,63 @@ ssh as@192.168.1.12 'echo aru63 | sudo -S systemctl stop orto-simulator'
 | `mosquitto_sub` non riceve nulla | `docker logs mosquitto --tail 50` | Cerca "Client connected" del `gw3000-orto-01` |
 | GW3000 ha perso il broker | `ping 192.168.1.12` da GW3000 (se possibile) + controllo IP del RPi5 | DHCP reservation sul router, IP fisso |
 | SSH "REMOTE HOST KEY CHANGED" | — | `ssh-keygen -R 192.168.1.12` poi riconnetti |
+
+---
+
+## 11. Notifiche Telegram (step 17)
+
+Servizio `orto-notify` (oneshot) + `orto-notify.timer` (ogni 15 min), installati in
+`/etc/systemd/system/` e pacchetto in `/opt/orto-digitale/scripts/orto_notify/`.
+**Il timer è attivo** (`orto-notify.timer`, ogni 15 minuti): `TELEGRAM_BOT_TOKEN` e
+`TELEGRAM_CHAT_ID` sono configurati in `/opt/orto-digitale/.env`, e il primo messaggio
+vero (batteria di `WH51_01` in calo) è stato consegnato il 2026-08-17.
+
+### 11.1 Prova a secco (nessun invio, sempre sicura da eseguire)
+
+```bash
+ssh as@192.168.1.12 'set -a; . /opt/orto-digitale/.env; set +a; cd /opt/orto-digitale/scripts && python3 -m orto_notify --once --dry-run'
+```
+
+Atteso: una riga finale `righe=... anomalie=... inviati=0` e, se ci sono anomalie, i testi
+dei messaggi **senza invio**. Se stampa `manca INFLUX_TOKEN_EXPORT_RO nell'ambiente` (o
+`righe=0`), il `.env` non è stato caricato — non aggirare il problema, è un sintomo di
+deploy/config, non di dati assenti.
+
+### 11.2 Invio manuale singolo (diagnostica, fuori dal timer)
+
+```bash
+ssh as@192.168.1.12 'set -a; . /opt/orto-digitale/.env; set +a; cd /opt/orto-digitale/scripts && python3 -m orto_notify --once'
+```
+
+Atteso: se ci sono anomalie eleggibili (fuori cooldown), il messaggio arriva sul telefono.
+Se Telegram risponde `400`, controllare che il testo non contenga sintassi Markdown (i test
+lo escludono, ma la verifica sul campo è la prova vera).
+
+### 11.3 Verificare che il timer sia attivo
+
+```bash
+ssh as@192.168.1.12 'systemctl list-timers | grep orto-notify'
+ssh as@192.168.1.12 'systemctl status orto-notify.timer'
+```
+
+Atteso: `orto-notify.timer` in elenco, con il prossimo giro entro 15 minuti.
+
+### 11.4 Stato e log
+
+```bash
+ssh as@192.168.1.12 'cat /opt/orto-digitale/notify/state.json'
+ssh as@192.168.1.12 'journalctl -u orto-notify.service --since "1 day ago" | tail -30'
+```
+
+Lo `state.json` è la memoria dell'anti-spam: per ogni coppia (sonda, tipo) tiene
+`ultimo_invio`/`ultimo_visto`. Cancellarlo non rompe nulla — al più fa ripetere un avviso
+già visto.
+
+### 11.5 Fermarlo
+
+```bash
+ssh as@192.168.1.12 'echo aru63 | sudo -S systemctl disable --now orto-notify.timer'
+```
+
+Nulla di ciò che riguarda l'irrigazione ne risente: il servizio di notifica è un processo
+separato che legge soltanto. Fermarlo non tocca né Node-RED né la valvola.
