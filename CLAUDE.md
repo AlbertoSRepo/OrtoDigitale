@@ -67,6 +67,12 @@ Ogni volta che si rideploya `flows.json`, i nodi credenziali vengono svuotati.
 ### 4. Sensori fisici attivi: WH51_01–04 (non 05–06)
 I sensori WH51_05 e WH51_06 non sono ancora fisicamente installati.
 
+### 5b. `total_liters` in `irrigation_events` è inaffidabile
+Il campo esiste ma i valori sono sbagliati fino a ~10x (un evento da 163 s risultava
+9,2 m³/h). **Non usarlo per nessun calcolo.** I litri si derivano dalla durata:
+`duration_seconds × 14 / 60` (14 L/min è la portata misurata stabile).
+Vale per report, analisi e qualsiasi feature futura.
+
 ### 5. Ownership volumi prima del primo `docker compose up`
 I container crashano al primo avvio se i permessi non sono impostati **prima**:
 ```bash
@@ -92,7 +98,30 @@ Utenti in `mosquitto/config/password_file`: `gw3000`, `nodered`, `zigbee2mqtt`, 
 | Measurement | Tag | Field |
 |---|---|---|
 | `soil_moisture` | `sensor_id` (WH51_01–06), `aiuola` (1/2/3), `position` (near/far) | `value` (float %), `battery_voltage`, `battery_ok`, `rssi` |
-| `irrigation_events` | `trigger` (auto/manual), `valve_id` | `state`, `duration_seconds`, `avg_moisture_at_trigger`, `reason`, `total_liters` (float, integrale flow), `liters_sample_count` (int), `liters_method` (`integrated`/`unavailable`) |
+| `irrigation_events` | `trigger` (auto/manual), `valve_id` | `state`, `duration_seconds`, `avg_moisture_at_trigger`, `reason` (vedi sotto), `total_liters` (float, integrale flow — **inaffidabile**, vedi footgun 5b), `liters_sample_count` (int), `liters_method` (`integrated`/`unavailable`) |
+
+### Valori di `reason` in `irrigation_events`
+
+`reason` è il **motivo reale di chiusura** della valvola, non il trigger di apertura
+(che è già il tag `trigger`). Chi chiude lascia il motivo in `global.last_close_reason`;
+`n-fn-valve-irrigation-event` lo raccoglie alla conferma OFF da Z2M, con guardia di
+freschezza a 120 s e fallback al trigger se assente.
+
+| Valore | Significato | Chi lo scrive |
+|---|---|---|
+| `threshold_reached` | media umidità ha superato `soglia_chiusura_pct` | `nd-fn-monitoring` |
+| `safety_timeout` | scaduto `safety_timeout_seconds` (auto) | `nd-fn-monitoring` / `n-fn-valve-safety` |
+| `manual_duration_reached` | scaduta la durata richiesta da un'apertura manuale | `n-fn-valve-safety` |
+| `comando manuale` | chiusura richiesta esplicitamente (frontend/API) | `n-fn-valve-irrigation-event` (fallback) |
+| `emergency` | chiusura di un'irrigazione di emergenza | `n-fn-valve-irrigation-event` (fallback) |
+| `recovery_timeout` / `orphan_*` | riconciliazione al boot | `nr-fn-recover` |
+
+> ⚠️ Gli eventi **precedenti al 2026-08-17** hanno `reason` derivato dal trigger
+> (`scheduled` / `comando manuale` / `emergency`): per quelli il motivo di chiusura
+> **non è recuperabile da InfluxDB**. Ricostruzione parziale possibile dai log del
+> container (`docker logs nodered | grep MONITORING`), che però ruotano a 30 MB.
+> Distinguere `threshold_reached` da `safety_timeout` è il dato su cui poggia la
+> verifica "15 minuti bastano?".
 | `valve_state` | `valve_id` (SWV_01) | `state` (ON/OFF), `reachable`, `linkquality`, `flow` (m³/h), `water_shortage` (bool), `water_leakage` (bool) |
 | `system_health` | `component`, `component_type` | `online`, `last_seen_seconds_ago`, `battery_low` |
 | `irrigation_forecast` | `method` (`et0`/`empirical`) | `seconds_until_next`, `band_low_seconds`, `band_high_seconds`, `moisture_mean`, `drying_rate_pct_h`, `confidence_level` |
