@@ -751,3 +751,36 @@ delle credenziali Node-RED** (`docs/comandi_verifica.md §5.5`).
 - Sezione **File chiave**: aggiungere `rpi5/nodered/data/node_modules/orto-rules/`
   come sede autoritativa della catena di regole di irrigazione, con la nota che
   `decision logic` non deve tornare a implementarla in proprio.
+
+---
+## Implementazione
+**Stato:** ✅ COMPLETATO — 2026-08-17
+**Commit di riferimento:** `feat(frontend): card della prossima irrigazione su Waterflow` (`6462331`)
+**Note:**
+- `k_pct_per_mm` stimato da `analysis/stima_k.mjs` sullo storico reale: **1.296**
+  (`p10=0.256`, `p90=4.593`). Errore mediano della proiezione a 12h: **1.95 pp**,
+  sotto la soglia di accettazione di 3 pp (margine oltre 1 pp) — dettagli in
+  `analysis/03_stima_asciugatura.md`.
+- Deploy eseguito in `mode=dry_run`, verificato (suite test 111/111, healthcheck
+  17/17, endpoint `/api/irrigation/forecast` con `method:"et0"` e punti
+  `irrigation_forecast` scritti su InfluxDB ogni ~5 min), poi tornato in `auto`.
+  Deploy via fallback WiFi (`192.168.1.46`): l'Ethernet non rispondeva al momento
+  del deploy.
+- Da oggi parte la settimana di confronto fra `irrigation_forecast` e gli
+  `irrigation_events` reali indicata al Passo 8 del piano.
+**Deviazioni dalla spec:**
+- **Prova di degradazione (Task 9, Passo 7) non eseguita end-to-end dal vivo.**
+  Il piano richiede di interrompere la raggiungibilità di Open-Meteo e attendere
+  che `weather_cache` superi `cache_max_age_seconds` (5400 s, ~90 min). Il
+  validatore di config impedisce di abbassare la soglia sotto
+  `polling_interval_seconds` proprio per evitare questa scorciatoia, e bloccare
+  la connettività meteo reale per un'ora e mezza nel giorno in cui parte la
+  settimana di monitoring non è sembrato un compromesso ragionevole. Il fallback
+  a `method:"empirical"` con confidenza ridotta resta verificato a livello
+  unitario (3 casi dedicati in `previsione.test.mjs`); la verifica dal vivo è
+  rimandata a un'osservazione opportunistica durante la settimana, o a un test
+  dedicato in un momento che non comprometta la raccolta dati.
+- Il modulo delle regole (D4) vive nel nodo `libreria regole` di `flows.json`,
+  non in `rpi5/nodered/data/node_modules/orto-rules/` come indicato in questa
+  sezione: è la correzione già registrata in §3/D4, qui confermata
+  nell'implementazione effettiva.

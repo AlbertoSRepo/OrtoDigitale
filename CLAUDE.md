@@ -95,6 +95,7 @@ Utenti in `mosquitto/config/password_file`: `gw3000`, `nodered`, `zigbee2mqtt`, 
 | `irrigation_events` | `trigger` (auto/manual), `valve_id` | `state`, `duration_seconds`, `avg_moisture_at_trigger`, `reason`, `total_liters` (float, integrale flow), `liters_sample_count` (int), `liters_method` (`integrated`/`unavailable`) |
 | `valve_state` | `valve_id` (SWV_01) | `state` (ON/OFF), `reachable`, `linkquality`, `flow` (m³/h), `water_shortage` (bool), `water_leakage` (bool) |
 | `system_health` | `component`, `component_type` | `online`, `last_seen_seconds_ago`, `battery_low` |
+| `irrigation_forecast` | `method` (`et0`/`empirical`) | `seconds_until_next`, `band_low_seconds`, `band_high_seconds`, `moisture_mean`, `drying_rate_pct_h`, `confidence_level` |
 
 ## Mapping sensori → aiuole
 
@@ -167,7 +168,10 @@ Il GW3000 pubblica **tutti i sensori** in un unico topic `ecowitt/gw3000` come s
 | 10 | Tracciamento idrico SWV: polling attivo `flow` + field anomalie | ✅ |
 | 11 | Archiviazione CSV su USB | ⏳ Da fare |
 | 12 | Vista orto schematica (umidità senza hover) | ✅ |
-| 13 | Editor layout orto + history spostamenti | ⏳ Prossimo |
+| 13 | Editor layout orto + history spostamenti | ✅ |
+| 14 | Registro sensori con scoperta dal gateway | ✅ |
+| 15 | Previsione prossima irrigazione (modello ET0 + fascia incertezza) | ✅ |
+| 16 | Modello di bagnatura (quanto sale l'umidità irrigando) | ⏳ Prossimo |
 
 ---
 
@@ -181,6 +185,7 @@ Il GW3000 pubblica **tutti i sensori** in un unico topic `ecowitt/gw3000` come s
 | `rpi5/docker-compose.yml` | Definizione container |
 | `rpi5/.env.example` | Template credenziali (il `.env` reale è solo sul RPi5) |
 | `rpi5/nodered/data/flows.json` | Flow Node-RED — source of truth |
+| `rpi5/nodered/data/flows.json` → nodo `libreria regole` (id `nr-fn-lib`, tab *Decision Loop*) | **Unica** sede della catena di regole di irrigazione, registrata in `global.orto_rules` al boot. `decision logic` e il simulatore di previsione (step 15) leggono da lì — non reimplementarla in nessun altro punto |
 | `rpi5/scripts/verify_rpi5.sh` | Healthcheck 10-check |
 | `docs/frontend_dati_spec.md` | Spec dati per step 5 |
 | `rpi5/nodered/data/orto_layout.seed.json` | Layout orto di partenza (aree coltura + posizione sonde) |
