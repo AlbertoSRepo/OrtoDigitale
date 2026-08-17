@@ -565,7 +565,83 @@ def _sezione_messaggi():
     prova("senza token non invia e non esplode", senza_token_non_invia_e_non_esplode)
 
 
-SEZIONI = [_sezione_influx, _sezione_features, _sezione_guardie, _sezione_modello, _sezione_conferma, _sezione_messaggi]
+def _sezione_ciclo():
+    from datetime import datetime, timedelta, timezone
+    from orto_notify import __main__ as principale
+
+    print("ciclo completo")
+
+    ADESSO = datetime(2026, 8, 17, 12, 0, tzinfo=timezone.utc)
+
+    def serie_finta(n_ore=400, muta=False):
+        righe = []
+        for sonda in ("WH51_01", "WH51_02", "WH51_03", "WH51_04"):
+            for h in range(n_ore, 0, -1):
+                if muta and sonda == "WH51_01" and h < 3:
+                    continue
+                righe.append({
+                    "sensor_id": sonda, "ora": ADESSO - timedelta(hours=h),
+                    "campioni": 60, "media": 50.0 + (h % 5) * 0.1,
+                    "sigma": 1.2, "batteria": 1.60, "silenzio_max_min": 1.0,
+                })
+        return righe
+
+    def trasporti(righe, muta=False):
+        inviati = []
+        sonde = ("WH51_01", "WH51_02", "WH51_03", "WH51_04")
+        ultimi = {s: ADESSO - timedelta(minutes=2) for s in sonde}
+        if muta:
+            ultimi["WH51_01"] = ADESSO - timedelta(minutes=70)
+        return {
+            "serie": lambda *a, **k: righe,
+            "finestre": lambda *a, **k: [],
+            "ultimi": lambda *a, **k: ultimi,
+            "telegram": lambda url, payload: (inviati.append(payload) or '{"ok":true}'),
+            "_inviati": inviati,
+        }
+
+    def orto_sano_non_manda_nulla():
+        t = trasporti(serie_finta())
+        esito = principale.ciclo("TI", "TT", "42", adesso=ADESSO, trasporti=t)
+        assert esito["inviati"] == 0, esito
+        assert t["_inviati"] == [], t["_inviati"]
+
+    def sonda_muta_produce_un_messaggio():
+        t = trasporti(serie_finta(muta=True), muta=True)
+        esito = principale.ciclo("TI", "TT", "42", adesso=ADESSO, trasporti=t,
+                                 stato_path="/tmp/orto_notify_ciclo_1.json")
+        assert esito["inviati"] >= 1, esito
+        assert "WH51_01" in t["_inviati"][0]["text"], t["_inviati"][0]
+
+    def dry_run_non_invia():
+        t = trasporti(serie_finta(muta=True), muta=True)
+        esito = principale.ciclo("TI", "TT", "42", adesso=ADESSO, trasporti=t,
+                                 dry_run=True, stato_path="/tmp/orto_notify_ciclo_2.json")
+        assert esito["anomalie"] >= 1, esito
+        assert t["_inviati"] == [], t["_inviati"]
+
+    def influx_giu_non_esplode():
+        def esplode(*a, **k):
+            raise OSError("connessione rifiutata")
+        t = {"serie": esplode, "finestre": lambda *a, **k: [],
+             "ultimi": lambda *a, **k: {},
+             "telegram": lambda url, payload: '{"ok":true}'}
+        esito = principale.ciclo("TI", "TT", "42", adesso=ADESSO, trasporti=t)
+        assert esito["righe"] == 0, esito
+        assert esito["inviati"] == 0, esito
+
+    import os
+    for f in ("/tmp/orto_notify_ciclo_1.json", "/tmp/orto_notify_ciclo_2.json"):
+        if os.path.exists(f):
+            os.remove(f)
+
+    prova("orto sano: nessun messaggio", orto_sano_non_manda_nulla)
+    prova("sonda muta: un messaggio con il suo nome", sonda_muta_produce_un_messaggio)
+    prova("--dry-run rileva ma non invia", dry_run_non_invia)
+    prova("InfluxDB irraggiungibile non fa cadere il ciclo", influx_giu_non_esplode)
+
+
+SEZIONI = [_sezione_influx, _sezione_features, _sezione_guardie, _sezione_modello, _sezione_conferma, _sezione_messaggi, _sezione_ciclo]
 
 
 if __name__ == "__main__":
