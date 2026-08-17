@@ -2608,3 +2608,85 @@ ssh as@192.168.1.12 'echo aru63 | sudo -S systemctl disable --now orto-notify.ti
 
 Nulla di ciò che riguarda l'irrigazione ne risente: il servizio di notifica è un processo
 separato che legge soltanto. Fermarlo non tocca né Node-RED né la valvola.
+
+---
+
+## Decisioni prese durante l'esecuzione
+
+Quindici decisioni sono state prese senza fermare il lavoro per chiedere. Queste sono
+quelle che hanno cambiato qualcosa di sostanziale; il registro completo resta in
+`.superpowers/sdd/step17_piano_implementazione/progress.md`.
+
+| Decisione | Perché | Costo se sbagliata |
+|---|---|---|
+| **Backtest ridotto da 100 a 30 giorni** | A 100 giorni non terminava dopo 17 minuti di CPU piena: `_backtest()` riaddestra il modello a ogni ora replicata su una finestra che cresce, quindi il costo è ~quadratico. 30 giorni coprono comunque le 4.3 settimane e la finestra del 16/08, cioè entrambe le metà del criterio | Taratura su base più stretta. Il ciclo di produzione non è toccato: addestra una volta per esecuzione |
+| **Timer non attivato finché non esisteva il bot** | Senza token `invia()` restituisce 0 senza sollevare: un timer attivo avrebbe girato ogni 15 minuti mandando nulla, dando l'illusione di un deploy finito | Nessuno: l'attivazione è un comando singolo, documentato sopra |
+| **Soglie G4 non validate, scartate** | Trovate nel working tree (`ORE_BLOCCATE` 12→24, `DELTA_SORELLA_PP` 3→5) con il commento «tarato sullo storico», residuo di un tentativo abortito. Verificato che il backtest era girato con le soglie originali: nessuna misura le sosteneva | Se un giorno G4 desse falsi positivi, si ritara con una misura a supporto invece che con un numero non giustificato |
+| **Blocco `GW3000_HOST` di un'altra sessione lasciato nel branch** | `git add <file>` stagia l'intero file e ha assorbito modifiche non committate di una sessione parallela. Verificato: quella sessione lo ha già committato sul proprio branch e i due blocchi sono byte-identici, quindi nessun conflitto. Rimuoverlo avrebbe richiesto di toccare un file condiviso mentre ci lavoravano | Una riga di attribuzione imprecisa nella storia git, spiegata qui |
+| **Criterio sui test Node-RED cambiato da «126 verdi» a «tutti verdi»** | Sono diventati 148 perché una sessione parallela ne ha aggiunti. Un conteggio assoluto è fragile quando due sessioni lavorano sullo stesso repo e avrebbe prodotto un falso allarme | Nessuno: il criterio sostitutivo è più forte, non più debole |
+| **Ribaltata una decisione precedente sul test dell'Isolation Forest** | Al task 5 avevo lasciato passare `spiegazione_presente`, che poteva superare senza verificare nulla, temendo divergenze fra scikit-learn 1.4.2 (RPi) e 1.9.0 (sviluppo). Backtest e servizio in produzione hanno poi girato entrambi su 1.4.2 senza divergere: il timore era infondato | Se il modello cambiasse comportamento su quel caso, ora il test fallirebbe — che è ciò che deve fare |
+
+### Cosa hanno trovato le review
+
+Tre difetti sono stati corretti solo perché qualcuno ha guardato il codice dopo che i test
+erano verdi. Nessuno dei tre era visibile dalla suite.
+
+- **Un test scriveva sullo stato di produzione.** Chiamava `ciclo()` senza `stato_path`,
+  ricadendo sul default `/opt/orto-digitale/notify/state.json`. Aveva già creato quel file
+  sulla macchina di sviluppo. Sul RPi avrebbe sovrascritto i cooldown reali con dati
+  sintetici, potendo scatenare una raffica di notifiche duplicate.
+- **`ciclo()` prometteva più di quanto mantenesse.** Il docstring diceva «non solleva mai»
+  ma sei superfici su otto erano scoperte — sotto un timer non sorvegliato, un'eccezione lì
+  avrebbe spento le notifiche in silenzio.
+- **Un fallimento di rete avrebbe bruciato il cooldown.** Lo stato registrava «inviato»
+  prima dell'invio: un blip durante il primo avviso batteria lo avrebbe marcato come
+  consegnato senza consegnarlo, e siccome la batteria continua a scendere il reset dopo sei
+  ore non sarebbe mai scattato. **Sette giorni di silenzio su un problema reale.**
+
+---
+
+## Cosa resta da fare
+
+In ordine di impatto.
+
+### 1. Due verifiche sul campo (dieci minuti, nessun codice)
+
+- **Spostare `WH51_03`.** Sta a `x=0.103` sulla fila 2, dove il layout segna l'area come
+  `libero` con **zero piante**. È l'unica sonda piantata dove non c'è nulla da irrigare: se
+  lì non passa un gocciolatoio, il suo dato è inutile per costruzione, e nessun modello può
+  compensarlo. Spostarla dove ci sono le piante vale più di qualsiasi taratura.
+- **Guardare la batteria di `WH51_01`.** È l'unica in calo (1.600 → 1.500 V in tre
+  settimane) e l'unica che perde pacchetti (48-73% consegnati contro il 99,9% delle altre).
+  Le due cose sono verosimilmente lo stesso guasto. Il bot ti ha già avvisato una volta e
+  tacerà per sette giorni su quel fronte.
+
+### 2. Chiudere `POST /api/valve/*` (precede questo step, ma ora conta di più)
+
+L'endpoint **non ha autenticazione**, Caddy proxa `/api/*` senza allowlist, non guarda
+`mode`, né la pausa, né il cooldown, e accetta durate fino a 3600 s. Caso peggiore: ~840 L
+su 40 m², circa 21 mm in un colpo, da chiunque sia sulla WiFi di casa con un `curl`.
+
+Non è stato introdotto da questo step e il bot **non lo espone** (parla e non ascolta), ma
+va chiuso prima di qualsiasi canale di comando remoto — è la ragione per cui la fase di
+ingresso comandi resta non autorizzata (§3/D1 della spec).
+
+### 3. Fase 2 — bagnatura non uniforme (bloccata su una misura)
+
+Serve prima la taratura del pavimento di rumore **per singola sonda**: la soglia di 1.31 pp
+dello step 16 è calibrata sulla *media* delle sonde attive, e il rumore della media di
+quattro sonde è circa la metà di quello di una sonda singola. Riusarla darebbe falsi
+positivi sistematici — cioè insegnerebbe a ignorare il bot, distruggendo il valore di tutto
+il resto.
+
+Deliverable bloccante: un export `analysis/umidita_per_sonda.csv` raggruppato per
+`sensor_id` (oggi `analysis/umidita.csv` contiene solo la media) e il pavimento di rumore
+per-sonda calcolato con lo stesso metodo di `analysis/stima_bagnatura.mjs`. Dettagli in
+§6.2 della spec.
+
+### Debito annotato, non urgente
+
+- `_backtest()` ha costo quadratico nel periodo: riaddestra il modello a ogni ora
+  replicata. Riguarda solo la taratura una-tantum, mai il ciclo di produzione.
+- Nel caso estremo in cui ogni feature coincida con la propria mediana, il messaggio
+  dell'Isolation Forest mostra l'intestazione «Cosa la distingue in questo momento:» senza
+  righe sotto. Non è un errore, è un dettaglio di forma.
