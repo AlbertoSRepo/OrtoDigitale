@@ -602,7 +602,8 @@ def _sezione_ciclo():
 
     def orto_sano_non_manda_nulla():
         t = trasporti(serie_finta())
-        esito = principale.ciclo("TI", "TT", "42", adesso=ADESSO, trasporti=t)
+        esito = principale.ciclo("TI", "TT", "42", adesso=ADESSO, trasporti=t,
+                                 stato_path="/tmp/orto_notify_ciclo_0.json")
         assert esito["inviati"] == 0, esito
         assert t["_inviati"] == [], t["_inviati"]
 
@@ -631,7 +632,7 @@ def _sezione_ciclo():
         assert esito["inviati"] == 0, esito
 
     import os
-    for f in ("/tmp/orto_notify_ciclo_1.json", "/tmp/orto_notify_ciclo_2.json"):
+    for f in ("/tmp/orto_notify_ciclo_0.json", "/tmp/orto_notify_ciclo_1.json", "/tmp/orto_notify_ciclo_2.json"):
         if os.path.exists(f):
             os.remove(f)
 

@@ -49,27 +49,33 @@ def ciclo(token_influx, token_tg, chat_id, adesso=None, dry_run=False,
         print("[notify] nessun dato nella finestra", file=sys.stderr)
         return {"anomalie": 0, "inviati": 0, "righe": 0}
 
-    arricchite = features.costruisci(righe)
-    anomalie = detect.guardie(arricchite, adesso, finestre, ultimi=ultimi)
-    anomalie += detect.anomalie_modello(arricchite, adesso, finestre)
+    try:
+        arricchite = features.costruisci(righe)
+        anomalie = detect.guardie(arricchite, adesso, finestre, ultimi=ultimi)
+        anomalie += detect.anomalie_modello(arricchite, adesso, finestre)
 
-    stato = state.carica(stato_path)
-    da_inviare, stato_nuovo = confirm.filtra(anomalie, stato, adesso)
-    tornate = confirm.rientri(anomalie, stato, adesso)
+        stato = state.carica(stato_path)
+        da_inviare, stato_nuovo = confirm.filtra(anomalie, stato, adesso)
+        tornate = confirm.rientri(anomalie, stato, adesso)
 
-    contesto = {
-        "batterie": {
-            r["sensor_id"]: r.get("batteria")
-            for r in sorted(arricchite, key=lambda x: x["ora"])
-            if r.get("batteria")
-        },
-        "aiuola": AIUOLE,
-    }
+        contesto = {
+            "batterie": {
+                r["sensor_id"]: r.get("batteria")
+                for r in sorted(arricchite, key=lambda x: x["ora"])
+                if r.get("batteria")
+            },
+            "aiuola": AIUOLE,
+        }
+
+        testi = [messages.componi(a, contesto) for a in da_inviare]
+        testi += [messages.rientro(s) for s in tornate]
+    except Exception as e:
+        # Stato in memoria inaffidabile a meta' rilevazione: non salvare,
+        # si riparte dall'ultimo stato buono al prossimo giro.
+        print("[notify] rilevazione fallita: %s" % e, file=sys.stderr)
+        return {"anomalie": 0, "inviati": 0, "righe": len(righe)}
 
     inviati = 0
-    testi = [messages.componi(a, contesto) for a in da_inviare]
-    testi += [messages.rientro(s) for s in tornate]
-
     for testo in testi:
         if dry_run:
             print("--- messaggio (non inviato) ---")
@@ -103,7 +109,7 @@ def principale(argv=None):
         print("manca %s nell'ambiente" % INFLUX_TOKEN_ENV, file=sys.stderr)
         return 2
 
-    if args.backtest:
+    if args.backtest is not None:
         return _backtest(token_influx, args.backtest)
 
     esito = ciclo(token_influx, token_tg, chat_id, dry_run=args.dry_run)
