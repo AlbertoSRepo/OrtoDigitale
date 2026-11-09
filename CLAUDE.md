@@ -1,5 +1,13 @@
 # Orto Digitale v1.1 — Guida Architetturale per Claude Code
 
+> 🛑 **Progetto v1.1 chiuso il 2026-11-09.** Acquisizione terminata: stack Docker giù
+> (`docker compose down`), `mode=paused`, valvola OFF, unità systemd `orto-*` disattivate.
+> I dati sono ancora su disco in `/opt/orto-digitale`. Archivio finale (dati, config, `.env`):
+> `C:\Users\user\Desktop\Workspace\OrtoDigitale\archivio_v1.1_2026-11-09\` (leggere
+> `LEGGIMI.md`). **Non dare per scontato che sul RPi giri ancora lo stack**: è destinato a un
+> altro progetto. In fase di chiusura è emerso un problema aperto (3 sonde lette a 0% → 555
+> irrigazioni di emergenza da settembre), descritto nel `LEGGIMI.md` e da risolvere in v2.0.
+
 ## Contesto progetto
 Sistema di irrigazione automatica per un orto residenziale ~40 m² con 3 aiuole. Gira interamente su un Raspberry Pi 5. Sviluppo su PC Windows, deploy via SSH.
 
@@ -17,7 +25,8 @@ Il **ciclo di controllo dell'irrigazione** (sensori → decisione → valvola �
 | Docker | Engine 26.x+, Compose v2 |
 | Root progetto RPi | `/opt/orto-digitale/` |
 | Compose file | `rpi5/docker-compose.yml` |
-| GW3000 IP | `192.168.1.5` |
+| GW3000 IP | `192.168.1.5` (solo WiFi, DHCP reservation) |
+| GW3000 → broker MQTT | **`192.168.1.46:1883`** = IP **WiFi** del RPi, non l'Ethernet `.12` (verificato il 2026-11-09). Se il RPi perde o cambia l'indirizzo WiFi, l'umidità smette di arrivare anche con l'Ethernet attiva. Dettagli: `docs/gw3000_configurazione.md` |
 | RPi IP Ethernet | `192.168.1.12` (statico via DHCP reservation — primario) |
 | RPi IP WiFi | `192.168.1.46` (statico via DHCP reservation — fallback) |
 | Password OS | `aru63` |
@@ -108,11 +117,16 @@ Utenti in `mosquitto/config/password_file`: `gw3000`, `nodered`, `zigbee2mqtt`, 
 | `soil_moisture` | `sensor_id` (WH51_01–06), `aiuola` (1/2/3), `position` (near/far) | `value` (float %), `battery_voltage`, `battery_ok` |
 | `irrigation_events` | `trigger` (auto/manual), `valve_id` | `state`, `duration_seconds`, `avg_moisture_at_trigger`, `reason` (vedi sotto), `total_liters` (float, integrale flow — **inaffidabile**, vedi footgun 5b), `liters_sample_count` (int), `liters_method` (`integrated`/`unavailable`) |
 
-> ⚠️ `soil_moisture` **non** ha un field `rssi`: non è mai stato scritto, e non potrebbe
-> esserlo, perché il payload MQTT del GW3000 contiene solo `soilmoisture{N}` e
-> `soilbatt{N}` — il gateway non pubblica alcun indicatore di potenza del segnale. La
-> "qualità del segnale" va dedotta dalla **regolarità di arrivo** dei campioni, non da un
-> field che non esiste.
+> ⚠️ `soil_moisture` **non** ha un field `rssi`: non è mai stato scritto. Il payload
+> **MQTT** del GW3000 non contiene alcun indicatore di potenza del segnale (solo
+> `soilmoisture{N}`, `soilad{N}`, `soilbatt{N}`). In v1.1 la "qualità del segnale" si deduce
+> dalla **regolarità di arrivo** dei campioni. L'RSSI per sonda esiste però nell'**API HTTP**
+> del gateway (`GET /get_sensors_info`, già interrogata dallo step 18 per gli id fisici). In
+> v2.0 lo si può storicizzare da lì, vedi `docs/gw3000_configurazione.md` §8.
+>
+> ⚠️ `soilad{N}` (valore grezzo AD della sonda) arriva nel payload ma viene **scartato** dal
+> parser. Il % è derivato dal gateway con la curva di fabbrica (≈ `(AD − 67) × 0,285`, stima
+> empirica). Senza AD non si può ricalibrare a posteriori: in v2.0 va salvato.
 
 ### Valori di `reason` in `irrigation_events`
 
@@ -254,6 +268,7 @@ Il GW3000 pubblica **tutti i sensori** in un unico topic `ecowitt/gw3000` come s
 | `docs/frontend_dati_spec.md` | Spec dati per step 5 |
 | `rpi5/nodered/data/orto_layout.seed.json` | Layout orto di partenza (aree coltura + posizione sonde) |
 | `rpi5/nodered/data/orto_sensors.seed.json` | Registro sensori di partenza (WH51_01–04 sui canali 1–4) |
+| `docs/gw3000_configurazione.md` | Configurazione **reale** del gateway Ecowitt (letta dalla sua API il 2026-11-09): upload MQTT, sonde accoppiate, calibrazione AD→%, endpoint HTTP, differenze rispetto allo step 2. ⚠️ L'API del gateway espone senza login la password WiFi e quella MQTT: non copiarle nei documenti |
 | `rpi5/scripts/orto_notify/` | Servizio di notifica Telegram — gira sull'**host**, fuori da Docker, sotto `orto-notify.timer` ogni 15 min. Non tocca `flows.json`: un suo errore non può raggiungere il decision loop. Il token Telegram sta in `.env`, quindi **non** entra nel giro di ri-iniezione credenziali di §5.5 |
 
 ### Pattern obbligatorio per docs/stepN_*.md

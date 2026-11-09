@@ -100,6 +100,10 @@ Il sub deve ricevere `ecowitt/gw3000 {"ping":"ok"}`. Se non succede, rileggere `
 
 ## 3. Configurazione del form GW3000
 
+> ⚠️ **Aggiornamento 2026-11-09:** la tabella sotto è la configurazione prevista ad aprile.
+> Quella reale, letta dal gateway, ha Host **`192.168.1.46`** (WiFi del RPi) e firmware
+> 1.2.1: vedi [`gw3000_configurazione.md`](gw3000_configurazione.md).
+
 Aprire l'interfaccia web del gateway: **http://192.168.1.5** → sezione **Customized** (screenshot di riferimento: `image.png` nella root del progetto).
 
 | Campo | Valore | Note |
