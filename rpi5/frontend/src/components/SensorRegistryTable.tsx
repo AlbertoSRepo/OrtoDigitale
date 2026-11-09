@@ -57,6 +57,7 @@ export function SensorRegistryTable() {
           <tr>
             <th>sensore</th>
             <th>canale</th>
+            <th>id sonda</th>
             <th>etichetta</th>
             <th>dove</th>
             <th>gateway</th>
@@ -71,6 +72,12 @@ export function SensorRegistryTable() {
               <tr key={s.sensor_id}>
                 <td className="mono">{s.sensor_id}</td>
                 <td className="tabular">{s.channel}</td>
+                <td
+                  className="mono"
+                  title={s.hw_id ? 'id stampato sulla sonda, letto dal GW3000' : 'gateway non raggiunto'}
+                >
+                  {s.hw_id ?? '—'}
+                </td>
                 <td>
                   <input
                     className="ov-crop"

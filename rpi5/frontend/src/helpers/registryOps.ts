@@ -46,6 +46,8 @@ export function registra(
       channel,
       label,
       registered_at: Math.floor(Date.now() / 1000),
+      // I derivati li ricalcola il server alla lettura successiva.
+      hw_id: null,
       placement: null,
       gateway: null,
     },

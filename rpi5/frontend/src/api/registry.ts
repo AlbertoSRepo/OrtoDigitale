@@ -1,19 +1,23 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiGet, apiPut } from './client';
 
-/** Riga del registro. `placement` e `gateway` sono derivati dal server: si
- *  leggono e basta, il PUT li ignora (step 14, D2). */
+/** Riga del registro. `hw_id`, `placement` e `gateway` sono derivati dal
+ *  server: si leggono e basta, il PUT li ignora (step 14, D2). */
 export interface RegistrySensor {
   sensor_id: string;
   channel: number;
   label: string;
   registered_at: number;
+  /** Id stampato sulla sonda, letto dal GW3000 (step 18). `null` se il
+   *  gateway non risponde: è una vista, non un dato memorizzato. */
+  hw_id: string | null;
   placement: { fila: number; x: number } | null;
   gateway: { seen_seconds_ago: number; moisture: number; battery_v: number | null } | null;
 }
 
 export interface DetectedChannel {
   channel: number;
+  hw_id: string | null;
   seen_seconds_ago: number;
   moisture: number;
   battery_v: number | null;

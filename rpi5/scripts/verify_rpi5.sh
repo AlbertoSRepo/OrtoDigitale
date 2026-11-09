@@ -493,6 +493,32 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# [18] Id fisici delle sonde dal GW3000 (step 18)
+# ---------------------------------------------------------------------------
+section "Id fisici delle sonde (step 18)"
+
+if docker exec nodered printenv GW3000_HOST >/dev/null 2>&1; then
+  check_ok "GW3000_HOST presente nel container nodered"
+else
+  check_fail "GW3000_HOST assente: ricreare il container (docker compose up -d nodered)"
+fi
+
+GW_HOST=$(docker exec nodered printenv GW3000_HOST 2>/dev/null || echo 192.168.1.5)
+if curl -s --max-time 5 "http://${GW_HOST}/get_sensors_info?page=1" 2>/dev/null | grep -q '"img"'; then
+  check_ok "GW3000 risponde su /get_sensors_info"
+else
+  check_fail "GW3000 (${GW_HOST}) non risponde: senza di lui gli id fisici spariscono dalla vista"
+fi
+
+# hw_id e' derivato e vive solo in global: dopo un riavvio di Node-RED resta
+# nullo finche' il tick da 15 minuti non ha girato almeno una volta.
+if echo "$REG_JSON" | grep -qE '"hw_id": *"[0-9a-f]+"'; then
+  check_ok "il registro serve almeno un id fisico"
+else
+  check_warn "nessun hw_id nel registro (Node-RED riavviato da meno di 30s? GW3000 muto?)"
+fi
+
+# ---------------------------------------------------------------------------
 # Report finale
 # ---------------------------------------------------------------------------
 echo

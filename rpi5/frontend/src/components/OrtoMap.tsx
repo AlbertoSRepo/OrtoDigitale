@@ -25,6 +25,8 @@ interface Props {
   thresholds: Thresholds;
   activeSensor: string | null;
   onSelectSensor: (id: string | null) => void;
+  /** sensor_id -> id fisico stampato sulla sonda (step 18), per il tooltip. */
+  hwIds?: Record<string, string | null>;
   /** In editor la mappa diventa interattiva; `layout` e' la bozza. */
   editing?: boolean;
   onChange?: (l: Layout) => void;
@@ -39,7 +41,7 @@ interface Hover {
 }
 
 export function OrtoMap({
-  layout, sensors, thresholds, activeSensor, onSelectSensor,
+  layout, sensors, thresholds, activeSensor, onSelectSensor, hwIds = {},
   editing = false, onChange, libereSonde = [], onNuovoSensore,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -113,7 +115,7 @@ export function OrtoMap({
           onNuovoSensore={onNuovoSensore ?? (() => {})}
         />
       )}
-      {hover && <SensorTooltip hover={hover} />}
+      {hover && <SensorTooltip hover={hover} hwId={hwIds[hover.sensor.sensor_id] ?? null} />}
     </div>
   );
 }
@@ -383,14 +385,14 @@ function CropStamp({
   );
 }
 
-function SensorTooltip({ hover }: { hover: Hover }) {
+function SensorTooltip({ hover, hwId }: { hover: Hover; hwId: string | null }) {
   const s = hover.sensor;
   const loc = SENSOR_LOCATIONS[s.sensor_id];
   const aiuola = s.aiuola ?? loc?.aiuola ?? '—';
   const position = s.position ?? loc?.position ?? '—';
   return (
     <div className="tooltip" style={{ left: hover.x, top: hover.y }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 }}>
         <h4>
           aiuola {aiuola} · {position}
         </h4>
@@ -399,6 +401,10 @@ function SensorTooltip({ hover }: { hover: Hover }) {
         </span>
       </div>
       <dl>
+          {/* L'id stampato sulla sonda: è l'unico modo per sapere, stando
+              davanti all'orto, quale pin della mappa si ha in mano. */}
+          <dt>id sonda</dt>
+          <dd>{hwId ?? '—'}</dd>
           <dt>batteria</dt>
           <dd>{s.battery_ok === null ? '—' : s.battery_ok ? 'ok' : 'scarica'}</dd>
           <dt>rssi</dt>

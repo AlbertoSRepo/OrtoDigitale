@@ -169,6 +169,62 @@ await t('gateway valorizzato dopo una lettura', async () => {
   assert.ok(p.sensori[0].gateway.seen_seconds_ago < 5);
 });
 
+console.log('\n--- id fisico dal gateway (step 18) ---');
+
+/** Come la lascia il nodo `id fisici dal gateway`. */
+const HW = { 1: { hw_id: '0fc98f', ts: Date.now() }, 3: { hw_id: '0fd04e', ts: Date.now() } };
+
+await t('hw_id segue il canale, non il sensor_id', async () => {
+  const h = conSeed();
+  h.store.gw_hw_ids = HW;
+  const p = await get(h);
+  assert.equal(p.sensori.find((s) => s.sensor_id === 'WH51_01').hw_id, '0fc98f');
+  assert.equal(p.sensori.find((s) => s.sensor_id === 'WH51_03').hw_id, '0fd04e');
+});
+
+await t('hw_id null per un canale che il gateway non ha scoperto', async () => {
+  const h = conSeed();
+  h.store.gw_hw_ids = HW;
+  const p = await get(h);
+  assert.equal(p.sensori.find((s) => s.sensor_id === 'WH51_02').hw_id, null);
+});
+
+await t('hw_id null se il GW3000 non ha mai risposto', async () => {
+  const h = conSeed();
+  const p = await get(h);
+  assert.ok(p.sensori.every((s) => s.hw_id === null), 'assente, non mancante dalla risposta');
+});
+
+await t('un canale ri-agganciato porta con se lid fisico nuovo', async () => {
+  const h = conSeed();
+  h.store.gw_hw_ids = HW;
+  const rimappato = JSON.parse(SEED);
+  rimappato.sensori[0].channel = 3;          // WH51_01 ora sul canale 3
+  rimappato.sensori[2].channel = 1;
+  h.store.orto_sensors = rimappato;
+  h.files['/data/orto_sensors.json'] = JSON.stringify(rimappato);
+  const p = await get(h);
+  assert.equal(p.sensori.find((s) => s.sensor_id === 'WH51_01').hw_id, '0fd04e');
+});
+
+await t('anche i rilevati portano lid fisico', async () => {
+  const h = conSeed();
+  h.store.gw_hw_ids = { 5: { hw_id: '0fd1a3', ts: Date.now() } };
+  await parse({ payload: PAYLOAD_5CH }, h.node, h.global, h.env, h.fs);
+  const p = await get(h);
+  assert.equal(p.rilevati[0].hw_id, '0fd1a3', 'serve a sapere quale sonda si sta registrando');
+});
+
+await t('il PUT ignora hw_id: e derivato, non si duplica nel registro', async () => {
+  const h = conSeed();
+  const body = JSON.parse(SEED);
+  body.sensori[0].hw_id = '0fc98f';
+  const r = await put(h, body);
+  assert.equal(r.statusCode, 200);
+  const salvato = JSON.parse(h.files['/data/orto_sensors.json']);
+  assert.ok(!('hw_id' in salvato.sensori[0]), 'due copie divergono, e vince quella sbagliata');
+});
+
 console.log('\n--- PUT /api/sensors/registry ---');
 
 async function put(h, body) {
